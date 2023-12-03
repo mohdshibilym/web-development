@@ -17,12 +17,12 @@ jobs:
 
     - name: Download files.
       run: |
-        Invoke-WebRequest https://github.com/r3xzt/GitHub-Action-RDP/raw/main/Windows/info.bat -OutFile info.bat
-        Invoke-WebRequest https://github.com/r3xzt/GitHub-Action-RDP/raw/main/Windows/loop.bat -OutFile loop.bat
+        Invoke-WebRequest https://raw.githubusercontent.com/devdilipstr/GitHub-Action-RDP/main/Windows/info.bat -OutFile info.bat
+        Invoke-WebRequest https://raw.githubusercontent.com/devdilipstr/GitHub-Action-RDP/main/Windows/loop.bat -OutFile loop.bat
 
     - name: Download Ngrok
 
-      run: Invoke-WebRequest https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
+      run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
 
     - name: Extract
 
@@ -47,8 +47,8 @@ jobs:
     - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
 
     - name: Create Tunnel
-
       run: .\ngrok\ngrok.exe tcp 3389
+
     - name: VM Info.
       run: cmd /c info.bat
 
