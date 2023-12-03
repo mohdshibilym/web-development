@@ -16,7 +16,7 @@ jobs:
         [Environment]::SetEnvironmentVariable('ANDROID_HOME', $env:ANDROID_HOME, [System.EnvironmentVariableTarget]::Machine)
 
     - name: Download Ngrok
-      run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+      run: Invoke-WebRequest https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
 
     - name: Extract
       run: Expand-Archive ngrok.zip
