@@ -10,10 +10,10 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v2
 
-    - name: Install Node.js
-      run: |
-        choco install nodejs -y
-        refreshenv
+    # - name: Install Node.js
+    #   run: |
+    #     choco install nodejs -y
+    #     refreshenv
 
     - name: Create Node.js Server
       run: |
