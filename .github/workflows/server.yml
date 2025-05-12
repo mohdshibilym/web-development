@@ -1,0 +1,47 @@
+name: Server
+
+on: [workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v2
+
+    - name: Install Node.js
+      run: |
+        choco install nodejs -y
+        refreshenv
+
+    - name: Create Node.js Server
+      run: |
+        echo "const http = require('http');" > server.js
+        echo "const server = http.createServer((req, res) => {" >> server.js
+        echo "  res.statusCode = 200;" >> server.js
+        echo "  res.setHeader('Content-Type', 'text/plain');" >> server.js
+        echo "  res.end('Hello, World!');" >> server.js
+        echo "});" >> server.js
+        echo "server.listen(3000, () => {" >> server.js
+        echo "  console.log('Server running at http://localhost:3000/');" >> server.js
+        echo "});" >> server.js
+
+    - name: Start Node.js Server
+      run: |
+        start /B node server.js
+
+    - name: Download and Install Playit
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
+        Start-Sleep -Seconds 5
+
+    - name: Start Playit Tunnel
+      env:
+        PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
+      run: |
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
+
+    - name: Keep Runner Alive
+      run: |
+        Start-Sleep -Seconds 3600
