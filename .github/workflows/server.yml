@@ -15,6 +15,12 @@ jobs:
     #   with:
     #     node-version: '18.x' # Specify your desired Node.js version
 
+    - name: Allow Node.js Port 3000 through Firewall
+      run: |
+        New-NetFirewallRule -DisplayName "Allow Node.js (Port 3000)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000
+        Write-Host "Firewall rule for TCP port 3000 added."
+      shell: pwsh # Use PowerShell for the firewall command
+
     - name: Install dependencies (if package.json exists)
       run: |
         if (Test-Path package.json) {
