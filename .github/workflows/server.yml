@@ -1,121 +1,70 @@
-name: Node.js Server with Playit (Debug v3)
+name: Node Server with Playit.gg
 
 on: [workflow_dispatch]
 
 jobs:
-  run-node-server:
-    runs-on: windows-latest
+  start-node-server:
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Check out repository code
-      uses: actions/checkout@v4
+    - name: Check out the repository
+      uses: actions/checkout@v2
 
     # - name: Set up Node.js
-    #   uses: actions/setup-node@v4
+    #   uses: actions/setup-node@v2
     #   with:
-    #     node-version: '18.x'
+    #     node-version: '16'
 
-    - name: Enable TS
-      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
-    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "p@ssw0rd!" -Force)
-
-
-    - name: Install dependencies (if package.json exists)
+    - name: Install dependencies
       run: |
-        if (Test-Path package.json) {
-          npm install
-        } else {
-          Write-Host "No package.json found, skipping npm install."
-        }
-      shell: pwsh
+        npm install express
+        # Add any other dependencies your Node.js application needs
 
-    - name: Start Node.js Server and Capture Output
+    - name: Create simple Express server
       run: |
-        Write-Host "Attempting to start Node.js server and redirect output..."
-        $stdOutPath = Join-Path $env:GITHUB_WORKSPACE "node_stdout.log"
-        $stdErrPath = Join-Path $env:GITHUB_WORKSPACE "node_stderr.log"
+        cat > server.js << 'EOL'
+        const express = require('express');
+        const app = express();
+        const port = 3000;
 
-        if (Test-Path server.js) {
-          Write-Host "Starting 'node server.js' with output redirection to:"
-          Write-Host "STDOUT: $stdOutPath"
-          Write-Host "STDERR: $stdErrPath"
-          # Using cmd /c to ensure redirection works reliably for Node.js background process
-          Start-Process cmd -ArgumentList "/c node server.js 1> $stdOutPath 2> $stdErrPath" -NoNewWindow
-          Write-Host "Node.js process launched."
-        } elseif (Test-Path package.json -and ((Get-Content package.json | ConvertFrom-Json).scripts.start)) {
-          Write-Host "Starting 'npm start' with output redirection (experimental for background):"
-          Write-Host "STDOUT: $stdOutPath"
-          Write-Host "STDERR: $stdErrPath"
-          Start-Process cmd -ArgumentList "/c npm start 1> $stdOutPath 2> $stdErrPath" -NoNewWindow
-          Write-Host "npm start process launched."
-        } else {
-          Write-Host "ERROR: Could not find server.js or npm start script."
-          exit 1
-        }
-        Write-Host "Waiting 15 seconds for Node.js server to initialize/error out and write logs..."
-        Start-Sleep -Seconds 15
-      shell: pwsh
+        app.get('/', (req, res) => {
+          res.send('Hello from GitHub Actions! Server is running via playit.gg tunnel');
+        });
 
-    - name: Display Node.js Logs
+        app.listen(port, '0.0.0.0', () => {
+          console.log(`Node.js server running on port ${port}`);
+        });
+        EOL
+
+    - name: Download and Install Playit
       run: |
-        Write-Host "---- Contents of node_stdout.log ----"
-        if (Test-Path node_stdout.log) {
-          Get-Content node_stdout.log -ErrorAction SilentlyContinue
-        } else {
-          Write-Host "node_stdout.log not found."
-        }
-        Write-Host "---- Contents of node_stderr.log ----"
-        if (Test-Path node_stderr.log) {
-          Get-Content node_stderr.log -ErrorAction SilentlyContinue
-        } else {
-          Write-Host "node_stderr.log not found."
-        }
-        Write-Host "------------------------------------"
-      shell: pwsh
-      # Always run this step to see the logs
-      if: always()
-
-
-    - name: Check Network Listeners (Port 3000) - Non-blocking
+        wget https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
+        chmod +x playit-linux-amd64
+        
+    - name: Start Node.js Server
       run: |
-        Write-Host "Checking network listeners for port 3000 AFTER attempting to start Node.js..."
-        netstat -ano | findstr ":3000"
-        Write-Host "If no output above this line containing ':3000', port was NOT listening."
-      shell: pwsh
-      continue-on-error: true
+        node server.js &
+        echo "Node.js server started on port 3000"
+        sleep 5 # Give the server some time to start
 
-    - name: Test Local Connection to Node.js Server
-      run: |
-        Write-Host "Attempting to connect to Node.js server locally on 127.0.0.1:3000..."
-        try {
-          Invoke-WebRequest -Uri "http://127.0.0.1:3000" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-          Write-Host "SUCCESS: Locally connected to Node.js server on 127.0.0.1:3000."
-        } catch {
-          Write-Host "FAILURE: Failed to connect to Node.js server locally on 127.0.0.1:3000."
-          Write-Host "Error details: $($_.Exception.Message)"
-        }
-      shell: pwsh
-      # This step's success depends heavily on Node.js logs and netstat
-      if: always() # Run this to see the outcome regardless of netstat
-
-    - name: Download Playit Agent
-      run: Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe" -ErrorAction Stop
-      shell: pwsh
-
-    - name: Run Playit Agent in Background
+    - name: Start Playit and Set Up TCP Tunnel
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
       run: |
-        Write-Host "Starting playit.exe with secret key..."
-        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow -Wait
-        Write-Host "Playit agent started. Waiting 15 seconds..."
-        Start-Sleep -Seconds 15
-      shell: pwsh
-
-    - name: Keep Workflow Running
+        ./playit-linux-amd64 setup-tcp-tunnel --secret ${{ secrets.PLAYIT_AUTH_KEY }} --local-port 3000 &
+        sleep 10 # Wait for the tunnel setup
+        # Start playit agent
+        ./playit-linux-amd64 &
+        
+    - name: Display Information
       run: |
-        Write-Host "Setup complete. Review Node.js logs, netstat, and local connection test."
-        Start-Sleep -Seconds 11800
-      shell: pwsh
+        echo "Node.js server is running on port 3000"
+        echo "Check your playit.gg dashboard for the public URL"
+          
+    # Keep the workflow running
+    - name: Keep the GitHub Action Runner Alive
+      run: |
+        for i in {1..360}; do
+          echo "Keeping runner alive - $i/360"
+          sleep 60
+        done
