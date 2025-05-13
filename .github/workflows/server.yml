@@ -1,47 +1,66 @@
 name: Server
 
-on: [workflow_dispatch]
+on: [workflow_dispatch] # Allows manual triggering
 
 jobs:
-  build:
+  run-node-server:
     runs-on: windows-latest
 
     steps:
-    - name: Check out the repository
-      uses: actions/checkout@v2
+    - name: Check out repository code
+      uses: actions/checkout@v4 # Use latest checkout action
 
-    # - name: Install Node.js
-    #   run: |
-    #     choco install nodejs -y
-    #     refreshenv
+    # - name: Set up Node.js
+    #   uses: actions/setup-node@v4
+    #   with:
+    #     node-version: '18.x' # Specify your desired Node.js version
 
-    - name: Create Node.js Server
+    - name: Install dependencies (if package.json exists)
       run: |
-        echo "const http = require('http');" > server.js
-        echo "const server = http.createServer((req, res) => {" >> server.js
-        echo "  res.statusCode = 200;" >> server.js
-        echo "  res.setHeader('Content-Type', 'text/plain');" >> server.js
-        echo "  res.end('Hello, World!');" >> server.js
-        echo "});" >> server.js
-        echo "server.listen(3000, () => {" >> server.js
-        echo "  console.log('Server running at http://localhost:3000/');" >> server.js
-        echo "});" >> server.js
+        if (Test-Path package.json) {
+          npm install
+        } else {
+          Write-Host "No package.json found, skipping npm install."
+        }
+      shell: pwsh # Use PowerShell for conditional logic
 
-    - name: Start Node.js Server
+    - name: Start Node.js Server in Background
       run: |
-        start node server.js
+        # Assuming your server start script is server.js or you use npm start
+        # If your start command is different, adjust accordingly.
+        if (Test-Path server.js) {
+          Write-Host "Starting node server.js..."
+          Start-Process node server.js -NoNewWindow
+        } elseif (Test-Path package.json -and ((Get-Content package.json | ConvertFrom-Json).scripts.start)) {
+          Write-Host "Starting npm start..."
+          Start-Process npm start -NoNewWindow
+        } else {
+          Write-Host "Could not find server.js or npm start script. Please ensure your server starts."
+          # You might want to fail the job here if the server can't start
+          # exit 1
+        }
+        Start-Sleep -Seconds 5 # Give the server a moment to start up
+      shell: pwsh
 
-    - name: Download and Install Playit
+    - name: Download Playit Agent
       run: |
         Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 5 # Give download time
+      shell: pwsh
 
-    - name: Start Playit Tunnel
+    - name: Run Playit Agent in Background
       env:
-        PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
+        PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }} # Your playit secret from GitHub secrets
       run: |
+        Write-Host "Starting playit.exe..."
+        # Start playit agent in the background using the secret key
         Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
+        Start-Sleep -Seconds 10 # Give playit time to connect
+      shell: pwsh
 
-    - name: Keep Runner Alive
+    - name: Keep Workflow Running
       run: |
-        Start-Sleep -Seconds 3600
+        Write-Host "Node.js server and Playit agent should be running."
+        Write-Host "Workflow will sleep to keep the runner active..."
+        Start-Sleep -Seconds 11800 # Keep alive for ~3 hours 15 minutes (adjust as needed)
+      shell: pwsh
