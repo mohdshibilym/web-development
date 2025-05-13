@@ -10,10 +10,10 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v2
 
-    # - name: Set up Node.js
-    #   uses: actions/setup-node@v2
-    #   with:
-    #     node-version: '16'
+    - name: Set up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '16'
 
     - name: Install dependencies
       run: |
@@ -51,10 +51,16 @@ jobs:
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
       run: |
-        ./playit-linux-amd64 setup-tcp-tunnel --secret ${{ secrets.PLAYIT_AUTH_KEY }} --local-port 3000 &
-        sleep 10 # Wait for the tunnel setup
-        # Start playit agent
+        # Setup playit with the auth key first
+        ./playit-linux-amd64 setup --secret ${{ secrets.PLAYIT_AUTH_KEY }}
+        sleep 5 # Wait for setup to complete
+        
+        # Start playit agent in background
         ./playit-linux-amd64 &
+        sleep 10 # Give it time to start up
+        
+        # Add a TCP tunnel for port 3000
+        echo "The tunnel should be visible in your playit.gg dashboard"
         
     - name: Display Information
       run: |
