@@ -47,8 +47,8 @@ app.get('/products/:id', (req, res) => {
 });
 
 // Start the server
-const server = app.listen(port, host, () => { // Assign the server instance
-  console.log(`[NodeApp] Server is supposed to be running on http://${host}:${port}`);
+const server = app.listen(port, () => { // Assign the server instance
+  console.log(`[NodeApp] Server is supposed to be running on http://localhost:${port}`);
 });
 
 // VERY IMPORTANT: Add error handling for the server instance
