@@ -26,54 +26,51 @@ jobs:
     - name: Create simple server file if not exists
       run: |
         if (-not (Test-Path "server.js")) {
-          @'
-const http = require('http');
-
-const server = http.createServer((req, res) => {
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/html');
-  res.end(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Node.js Server on GitHub Actions</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            margin: 40px;
-            line-height: 1.6;
-          }
-          h1 {
-            color: #333;
-          }
-          .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: #f4f4f4;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-          }
-        </style>
-      </head>
-      <body>
+          @'const http = require('http');
+          const server = http.createServer((req, res) => {
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'text/html');
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <title>Node.js Server on GitHub Actions</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                margin: 40px;
+                line-height: 1.6;
+              }
+              h1 {
+                color: #333;
+              }
+              .container {
+                max-width: 800px;
+                margin: 0 auto;
+                background: #f4f4f4;
+                padding: 20px;
+                border-radius: 5px;
+                box-shadow: 0 0 10px rgba(0,0,0,0.1);
+              }
+          </style>
+        </head>
+        <body>
         <div class="container">
           <h1>Node.js Server Running Successfully!</h1>
           <p>This server is running on GitHub Actions and tunneled through playit.gg</p>
           <p>Current server time: ${new Date().toISOString()}</p>
           <p>Request URL: ${req.url}</p>
         </div>
-      </body>
-    </html>
-  `);
-});
+        </body>
+        </html>`);
+        });
 
-const PORT = process.env.PORT || 3000;
+        const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-'@ | Out-File -FilePath "server.js"
+        server.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+          });
+          '@ | Out-File -FilePath "server.js"
         }
 
     - name: Download and Install Playit
