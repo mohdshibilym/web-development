@@ -1,4 +1,4 @@
-name: Node.js Server with Playit (Debug)
+name: Node.js Server with Playit (Debug v2)
 
 on: [workflow_dispatch]
 
@@ -13,18 +13,13 @@ jobs:
     # - name: Set up Node.js
     #   uses: actions/setup-node@v4
     #   with:
-    #     node-version: '18.x' # Or your desired Node.js version
+    #     node-version: '18.x'
+
+    # Recommendation: Ensure your Node.js server listens on '0.0.0.0' instead of 'localhost' or '127.0.0.1'
+    # Example: server.listen(3000, '0.0.0.0', () => console.log('Server running'));
 
     - name: Create Firewall Rule for Port 3000
-      run: |
-        New-NetFirewallRule -DisplayName "Allow Node.js (Port 3000)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000 -ErrorAction Stop
-        Write-Host "Firewall rule for TCP port 3000 supposedly added."
-      shell: pwsh
-
-    - name: Verify Firewall Rule
-      run: |
-        Get-NetFirewallRule -DisplayName "Allow Node.js (Port 3000)" | Format-Table -AutoSize
-        Write-Host "Firewall rule details above."
+      run: New-NetFirewallRule -DisplayName "Allow Node.js (Port 3000)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000 -ErrorAction Stop
       shell: pwsh
 
     - name: Install dependencies (if package.json exists)
@@ -39,7 +34,6 @@ jobs:
     - name: Start Node.js Server in Background
       run: |
         Write-Host "Attempting to start Node.js server..."
-        # Ensure your server script is server.js or npm start is configured
         if (Test-Path server.js) {
           Start-Process node server.js -NoNewWindow
           Write-Host "Started 'node server.js' in the background."
@@ -50,36 +44,38 @@ jobs:
           Write-Host "ERROR: Could not find server.js or npm start script."
           exit 1
         }
-        Write-Host "Waiting for Node.js server to initialize..."
-        Start-Sleep -Seconds 15 # Increased wait time for server to be fully up
+        Write-Host "Waiting 20 seconds for Node.js server to initialize..."
+        Start-Sleep -Seconds 20 # Slightly longer wait
       shell: pwsh
 
-    - name: Check Network Listeners (Port 3000)
+    - name: Check Network Listeners (Port 3000) - Non-blocking
+      # This step will show output if port 3000 is listening, but won't fail the job if it's not found
       run: |
         Write-Host "Checking network listeners for port 3000..."
         netstat -ano | findstr ":3000"
-        Write-Host "Above line should show if port 3000 is in LISTENING state."
-        Start-Sleep -Seconds 2 # Brief pause
+        Write-Host "Check output above. If empty, port 3000 was NOT listening."
+        # We use 'continue' so findstr's exit code 1 (if not found) doesn't fail the step
       shell: pwsh
+      continue-on-error: true # Allows workflow to continue even if findstr returns 1
 
     - name: Test Local Connection to Node.js Server
       run: |
         Write-Host "Attempting to connect to Node.js server locally on 127.0.0.1:3000..."
         try {
-          Invoke-WebRequest -Uri "http://127.0.0.1:3000" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
-          Write-Host "SUCCESS: Locally connected to Node.js server on 127.0.0.1:3000."
+          # Using localhost here as Node often logs localhost even if listening on 0.0.0.0
+          Invoke-WebRequest -Uri "http://localhost:3000" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+          Write-Host "SUCCESS: Locally connected to Node.js server on localhost:3000."
         } catch {
-          Write-Host "ERROR: Failed to connect to Node.js server locally on 127.0.0.1:3000."
+          Write-Host "FAILURE: Failed to connect to Node.js server locally on localhost:3000."
           Write-Host "Error details: $($_.Exception.Message)"
-          # Consider exiting if local connection fails, as Playit won't work
-          # exit 1 
+          Write-Host "This confirms the server is not running/accessible, even if netstat showed listening."
+          # Optional: Exit here if local connection MUST work for Playit
+          # exit 1
         }
       shell: pwsh
 
     - name: Download Playit Agent
-      run: |
-        Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe" -ErrorAction Stop
-        Start-Sleep -Seconds 5
+      run: Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe" -ErrorAction Stop
       shell: pwsh
 
     - name: Run Playit Agent in Background
@@ -87,25 +83,16 @@ jobs:
         PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
       run: |
         Write-Host "Starting playit.exe with secret key..."
-        # Ensure only one instance of playit is managing tunnels with the secret
         Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow -Wait
-        Write-Host "Playit agent started in background. Waiting for it to establish tunnels..."
-        Start-Sleep -Seconds 20 # Give Playit ample time to connect and log initial status
+        Write-Host "Playit agent started. Waiting 15 seconds..."
+        Start-Sleep -Seconds 15
       shell: pwsh
-
-    - name: Check Playit Status (by observing logs indirectly)
-      run: |
-        Write-Host "Playit should be running. Check the workflow logs for Playit output."
-        Write-Host "If Playit started correctly, it will show tunnel information."
-        Write-Host "If the 'Test Local Connection' step above failed, Playit will not be able to forward traffic."
-        Start-Sleep -Seconds 5
 
     - name: Keep Workflow Running
       run: |
-        Write-Host "Node.js server and Playit agent setup complete based on workflow steps."
-        Write-Host "If all previous steps were successful, your Playit URL for port 3000 should be accessible."
-        Write-Host "If 'Test Local Connection' failed, the issue is with the Node.js server or local firewall/config."
-        Write-Host "If local connection succeeded but Playit URL fails, the issue is likely with Playit forwarding or a more complex firewall interaction."
-        Write-Host "Workflow will now sleep to keep the runner active..."
+        Write-Host "Setup complete. Check 'Test Local Connection' step result."
+        Write-Host "If local connection failed, Playit tunnel will not work."
+        Write-Host "If local connection succeeded, check your Playit URL."
+        Write-Host "Workflow will now sleep..."
         Start-Sleep -Seconds 11800
       shell: pwsh
