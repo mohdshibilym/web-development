@@ -1,4 +1,4 @@
-name: Node.js Server with Playit (Debug v2)
+name: Node.js Server with Playit (Debug v3)
 
 on: [workflow_dispatch]
 
@@ -15,9 +15,6 @@ jobs:
     #   with:
     #     node-version: '18.x'
 
-    # Recommendation: Ensure your Node.js server listens on '0.0.0.0' instead of 'localhost' or '127.0.0.1'
-    # Example: server.listen(3000, '0.0.0.0', () => console.log('Server running'));
-
     - name: Create Firewall Rule for Port 3000
       run: New-NetFirewallRule -DisplayName "Allow Node.js (Port 3000)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000 -ErrorAction Stop
       shell: pwsh
@@ -31,48 +28,74 @@ jobs:
         }
       shell: pwsh
 
-    - name: Start Node.js Server in Background
+    - name: Start Node.js Server and Capture Output
       run: |
-        Write-Host "Attempting to start Node.js server..."
+        Write-Host "Attempting to start Node.js server and redirect output..."
+        $stdOutPath = Join-Path $env:GITHUB_WORKSPACE "node_stdout.log"
+        $stdErrPath = Join-Path $env:GITHUB_WORKSPACE "node_stderr.log"
+
         if (Test-Path server.js) {
-          Start-Process node server.js -NoNewWindow
-          Write-Host "Started 'node server.js' in the background."
+          Write-Host "Starting 'node server.js' with output redirection to:"
+          Write-Host "STDOUT: $stdOutPath"
+          Write-Host "STDERR: $stdErrPath"
+          # Using cmd /c to ensure redirection works reliably for Node.js background process
+          Start-Process cmd -ArgumentList "/c node server.js 1> $stdOutPath 2> $stdErrPath" -NoNewWindow
+          Write-Host "Node.js process launched."
         } elseif (Test-Path package.json -and ((Get-Content package.json | ConvertFrom-Json).scripts.start)) {
-          Start-Process npm start -NoNewWindow
-          Write-Host "Started 'npm start' in the background."
+          Write-Host "Starting 'npm start' with output redirection (experimental for background):"
+          Write-Host "STDOUT: $stdOutPath"
+          Write-Host "STDERR: $stdErrPath"
+          Start-Process cmd -ArgumentList "/c npm start 1> $stdOutPath 2> $stdErrPath" -NoNewWindow
+          Write-Host "npm start process launched."
         } else {
           Write-Host "ERROR: Could not find server.js or npm start script."
           exit 1
         }
-        Write-Host "Waiting 20 seconds for Node.js server to initialize..."
-        Start-Sleep -Seconds 20 # Slightly longer wait
+        Write-Host "Waiting 15 seconds for Node.js server to initialize/error out and write logs..."
+        Start-Sleep -Seconds 15
       shell: pwsh
 
-    - name: Check Network Listeners (Port 3000) - Non-blocking
-      # This step will show output if port 3000 is listening, but won't fail the job if it's not found
+    - name: Display Node.js Logs
       run: |
-        Write-Host "Checking network listeners for port 3000..."
-        netstat -ano | findstr ":3000"
-        Write-Host "Check output above. If empty, port 3000 was NOT listening."
-        # We use 'continue' so findstr's exit code 1 (if not found) doesn't fail the step
+        Write-Host "---- Contents of node_stdout.log ----"
+        if (Test-Path node_stdout.log) {
+          Get-Content node_stdout.log -ErrorAction SilentlyContinue
+        } else {
+          Write-Host "node_stdout.log not found."
+        }
+        Write-Host "---- Contents of node_stderr.log ----"
+        if (Test-Path node_stderr.log) {
+          Get-Content node_stderr.log -ErrorAction SilentlyContinue
+        } else {
+          Write-Host "node_stderr.log not found."
+        }
+        Write-Host "------------------------------------"
       shell: pwsh
-      continue-on-error: true # Allows workflow to continue even if findstr returns 1
+      # Always run this step to see the logs
+      if: always()
+
+
+    - name: Check Network Listeners (Port 3000) - Non-blocking
+      run: |
+        Write-Host "Checking network listeners for port 3000 AFTER attempting to start Node.js..."
+        netstat -ano | findstr ":3000"
+        Write-Host "If no output above this line containing ':3000', port was NOT listening."
+      shell: pwsh
+      continue-on-error: true
 
     - name: Test Local Connection to Node.js Server
       run: |
         Write-Host "Attempting to connect to Node.js server locally on 127.0.0.1:3000..."
         try {
-          # Using localhost here as Node often logs localhost even if listening on 0.0.0.0
-          Invoke-WebRequest -Uri "http://localhost:3000" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
-          Write-Host "SUCCESS: Locally connected to Node.js server on localhost:3000."
+          Invoke-WebRequest -Uri "http://127.0.0.1:3000" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+          Write-Host "SUCCESS: Locally connected to Node.js server on 127.0.0.1:3000."
         } catch {
-          Write-Host "FAILURE: Failed to connect to Node.js server locally on localhost:3000."
+          Write-Host "FAILURE: Failed to connect to Node.js server locally on 127.0.0.1:3000."
           Write-Host "Error details: $($_.Exception.Message)"
-          Write-Host "This confirms the server is not running/accessible, even if netstat showed listening."
-          # Optional: Exit here if local connection MUST work for Playit
-          # exit 1
         }
       shell: pwsh
+      # This step's success depends heavily on Node.js logs and netstat
+      if: always() # Run this to see the outcome regardless of netstat
 
     - name: Download Playit Agent
       run: Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe" -ErrorAction Stop
@@ -90,9 +113,6 @@ jobs:
 
     - name: Keep Workflow Running
       run: |
-        Write-Host "Setup complete. Check 'Test Local Connection' step result."
-        Write-Host "If local connection failed, Playit tunnel will not work."
-        Write-Host "If local connection succeeded, check your Playit URL."
-        Write-Host "Workflow will now sleep..."
+        Write-Host "Setup complete. Review Node.js logs, netstat, and local connection test."
         Start-Sleep -Seconds 11800
       shell: pwsh
