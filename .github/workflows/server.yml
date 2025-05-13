@@ -54,9 +54,9 @@ jobs:
       run: |
         Write-Host "Starting playit.exe..."
         # Start playit agent in the background using the secret key
-        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
-        Start-Sleep -Seconds 10 # Give playit time to connect
-      shell: pwsh
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow -Wait
+        # Start-Sleep -Seconds 10 # Give playit time to connect
+      # shell: pwsh
 
     - name: Keep Workflow Running
       run: |
