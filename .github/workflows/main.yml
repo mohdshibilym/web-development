@@ -7,13 +7,6 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Check out the repository
-      uses: actions/checkout@v2
-
-    - name: Install project dependencies
-      run: |
-        npm install
-
     - name: Download and Install Playit
       run: |
         Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
@@ -31,16 +24,10 @@ jobs:
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
       run: |
-        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow -Wait
         Start-Sleep -Seconds 10
 
-    - name: Start Node.js Server
-      run: |
-        Start-Process -FilePath "node" -ArgumentList "server.js" -NoNewWindow -Wait
-        # Wait for the server to start
-        Start-Sleep -Seconds 5
-
-        
+    
     # Prevent workflow to stop
     - name: Keep the GitHub Action Runner Alive
       run: |
