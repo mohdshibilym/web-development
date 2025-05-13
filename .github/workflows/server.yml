@@ -1,57 +1,40 @@
 name: Node.js Server with Playit.gg
 
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
 
 jobs:
-  setup-node-server:
+  node-server:
     runs-on: windows-latest
 
     steps:
-    - name: Check out the repository
-      uses: actions/checkout@v3
+      - name: Check out the repository
+        uses: actions/checkout@v3
 
-    # - name: Set up Node.js
-    #   uses: actions/setup-node@v3
-    #   with:
-    #     node-version: '18'
+      - name: Install dependencies
+        run: npm install
 
-    - name: Install project dependencies
-      run: |
-        npm install
+      - name: Download and Install Playit.gg
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
+          Start-Sleep -Seconds 5  # Allow the download to complete
 
-    - name: Start Node.js Server
-      run: |
-        npm run start
-        # Wait for the server to start
-        Start-Sleep -Seconds 5
+      - name: Start Node.js server and Playit.gg tunnel concurrently
+        env:
+          PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
+        run: |
+          $nodeJob = Start-Job -ScriptBlock {
+            cd $env:GITHUB_WORKSPACE
+            node server.js
+          }
 
-    - name: Download and Install Playit
-      run: |
-        Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
-        Start-Sleep -Seconds 5  # Give some time for the download to complete
+          $playitJob = Start-Job -ScriptBlock {
+            & "$env:USERPROFILE\playit.exe" --secret $env:PLAYIT_AUTH_KEY
+          }
 
-    # Default, optional.
-    - name: Enable TS
-      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
-    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "p@ssw0rd!" -Force)
+          # Wait for both jobs to complete
+          Wait-Job -Job $nodeJob, $playitJob
 
-
-    - name: Start Playit and Set Up Port Tunnel
-      env:
-        PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
-      run: |
-        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow -Wait
-        Start-Sleep -Seconds 10
-        
-        # Print information for the user
-        Write-Host "Node.js server started on port 3000 and tunneled via playit.gg"
-        Write-Host "Check the playit.gg dashboard for your public URL"
-
-    # Keep the workflow running
-    - name: Keep the GitHub Action Runner Alive
-      run: |
-        Write-Host "Node.js server is running and accessible via playit.gg"
-        Write-Host "The workflow will stay alive for approximately 3 hours"
-        Start-Sleep -Seconds 10800  # Run for 3 hours
+          # Retrieve job outputs (optional)
+          Receive-Job -Job $nodeJob
+          Receive-Job -Job $playitJob
