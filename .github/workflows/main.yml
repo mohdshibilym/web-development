@@ -27,18 +27,18 @@ jobs:
     - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
     - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "p@ssw0rd!" -Force)
 
-    - name: Start Node.js Server
-      run: |
-        Start-Process -FilePath "node" -ArgumentList "server.js" -NoNewWindow
-        # Wait for the server to start
-        Start-Sleep -Seconds 5
-
     - name: Start Playit and Set Up RDP Tunnel
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
       run: |
-        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow -Wait
-        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -NoNewWindow
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
+        Start-Sleep -Seconds 10
+
+    - name: Start Node.js Server
+      run: |
+        Start-Process -FilePath "node" -ArgumentList "server.js" -NoNewWindow -Wait
+        # Wait for the server to start
+        Start-Sleep -Seconds 5
 
         
     # Prevent workflow to stop
