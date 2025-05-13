@@ -10,10 +10,10 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v3
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
+    # - name: Set up Node.js
+    #   uses: actions/setup-node@v3
+    #   with:
+    #     node-version: '18'
 
     - name: Install project dependencies
       run: |
@@ -24,11 +24,13 @@ jobs:
         Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
         Start-Sleep -Seconds 5  # Give some time for the download to complete
 
-    - name: Start Node.js Server
-      run: |
-        Start-Process -FilePath "node" -ArgumentList "server.js" -NoNewWindow
-        # Wait for the server to start
-        Start-Sleep -Seconds 5
+    # Default, optional.
+    - name: Enable TS
+      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "p@ssw0rd!" -Force)
+
 
     - name: Start Playit and Set Up Port Tunnel
       env:
@@ -43,7 +45,12 @@ jobs:
         # Print information for the user
         Write-Host "Node.js server started on port 3000 and tunneled via playit.gg"
         Write-Host "Check the playit.gg dashboard for your public URL"
-        
+
+    - name: Start Node.js Server
+      run: |
+        Start-Process -FilePath "node" -ArgumentList "server.js" -NoNewWindow
+        # Wait for the server to start
+        Start-Sleep -Seconds 5
     # Keep the workflow running
     - name: Keep the GitHub Action Runner Alive
       run: |
