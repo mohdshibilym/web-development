@@ -10,6 +10,10 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v2
 
+    - name: Install project dependencies
+      run: |
+        npm install
+
     - name: Download and Install Playit
       run: |
         Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
@@ -22,6 +26,12 @@ jobs:
     - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
     - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
     - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "p@ssw0rd!" -Force)
+
+    - name: Start Node.js Server
+      run: |
+        Start-Process -FilePath "node" -ArgumentList "server.js" -NoNewWindow
+        # Wait for the server to start
+        Start-Sleep -Seconds 5
 
     - name: Start Playit and Set Up RDP Tunnel
       env:
