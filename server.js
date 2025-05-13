@@ -1,6 +1,7 @@
 const express = require('express');
 const app = express();
 const port = 3000;
+const host = '0.0.0.0'; // <--- ADD THIS LINE
 
 // Dummy data
 const users = [
@@ -51,6 +52,6 @@ app.get('/products/:id', (req, res) => {
 });
 
 // Start the server
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
+app.listen(port, host, () => { // <--- MODIFY THIS LINE to include 'host'
+  console.log(`Server is running on http://${host}:${port}`); // You can also update the log message
 });
