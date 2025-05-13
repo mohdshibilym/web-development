@@ -1,76 +1,109 @@
-name: Node Server with Playit.gg
+name: Node.js Server with Playit.gg
 
 on: [workflow_dispatch]
 
 jobs:
-  start-node-server:
-    runs-on: ubuntu-latest
+  setup-node-server:
+    runs-on: windows-latest
 
     steps:
     - name: Check out the repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
     - name: Set up Node.js
-      uses: actions/setup-node@v2
+      uses: actions/setup-node@v3
       with:
-        node-version: '16'
+        node-version: '18'
 
-    - name: Install dependencies
+    - name: Install project dependencies
       run: |
-        npm install express
-        # Add any other dependencies your Node.js application needs
+        npm install
+        # If you don't have a package.json already, you could create a basic one:
+        # if (-not (Test-Path "package.json")) {
+        #   '{ "name": "simple-node-server", "version": "1.0.0", "scripts": { "start": "node server.js" } }' | Out-File -FilePath "package.json"
+        # }
 
-    - name: Create simple Express server
+    - name: Create simple server file if not exists
       run: |
-        cat > server.js << 'EOL'
-        const express = require('express');
-        const app = express();
-        const port = 3000;
+        if (-not (Test-Path "server.js")) {
+          @'
+const http = require('http');
 
-        app.get('/', (req, res) => {
-          res.send('Hello from GitHub Actions! Server is running via playit.gg tunnel');
-        });
+const server = http.createServer((req, res) => {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'text/html');
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Node.js Server on GitHub Actions</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            line-height: 1.6;
+          }
+          h1 {
+            color: #333;
+          }
+          .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #f4f4f4;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>Node.js Server Running Successfully!</h1>
+          <p>This server is running on GitHub Actions and tunneled through playit.gg</p>
+          <p>Current server time: ${new Date().toISOString()}</p>
+          <p>Request URL: ${req.url}</p>
+        </div>
+      </body>
+    </html>
+  `);
+});
 
-        app.listen(port, '0.0.0.0', () => {
-          console.log(`Node.js server running on port ${port}`);
-        });
-        EOL
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+'@ | Out-File -FilePath "server.js"
+        }
 
     - name: Download and Install Playit
       run: |
-        wget https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-linux-amd64
-        chmod +x playit-linux-amd64
-        
+        Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
+        Start-Sleep -Seconds 5  # Give some time for the download to complete
+
     - name: Start Node.js Server
       run: |
-        node server.js &
-        echo "Node.js server started on port 3000"
-        sleep 5 # Give the server some time to start
+        Start-Process -FilePath "node" -ArgumentList "server.js" -NoNewWindow
+        # Wait for the server to start
+        Start-Sleep -Seconds 5
 
-    - name: Start Playit and Set Up TCP Tunnel
+    - name: Start Playit and Set Up Port Tunnel
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
       run: |
-        # Setup playit with the auth key first
-        ./playit-linux-amd64 setup --secret ${{ secrets.PLAYIT_AUTH_KEY }}
-        sleep 5 # Wait for setup to complete
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret $env:PLAYIT_AUTH_KEY" -NoNewWindow
+        Start-Sleep -Seconds 10
         
-        # Start playit agent in background
-        ./playit-linux-amd64 &
-        sleep 10 # Give it time to start up
+        # Add TCP tunnel for Node.js server
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "add-tunnel --name node-server --local-port 3000" -NoNewWindow
         
-        # Add a TCP tunnel for port 3000
-        echo "The tunnel should be visible in your playit.gg dashboard"
+        # Print information for the user
+        Write-Host "Node.js server started on port 3000 and tunneled via playit.gg"
+        Write-Host "Check the playit.gg dashboard for your public URL"
         
-    - name: Display Information
-      run: |
-        echo "Node.js server is running on port 3000"
-        echo "Check your playit.gg dashboard for the public URL"
-          
     # Keep the workflow running
     - name: Keep the GitHub Action Runner Alive
       run: |
-        for i in {1..360}; do
-          echo "Keeping runner alive - $i/360"
-          sleep 60
-        done
+        Write-Host "Node.js server is running and accessible via playit.gg"
+        Write-Host "The workflow will stay alive for approximately 3 hours"
+        Start-Sleep -Seconds 10800  # Run for 3 hours
