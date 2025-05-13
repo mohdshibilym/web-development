@@ -1,7 +1,7 @@
 const express = require('express');
 const app = express();
 const port = 3000;
-const host = '0.0.0.0'; // <--- ADD THIS LINE
+const host = '0.0.0.0'; // Correctly set
 
 // Dummy data
 const users = [
@@ -20,13 +20,10 @@ const products = [
 app.use(express.json());
 
 // Endpoints
-
-// Get all users
 app.get('/users', (req, res) => {
   res.json(users);
 });
 
-// Get a user by ID
 app.get('/users/:id', (req, res) => {
   const user = users.find(u => u.id === parseInt(req.params.id));
   if (user) {
@@ -36,12 +33,10 @@ app.get('/users/:id', (req, res) => {
   }
 });
 
-// Get all products
 app.get('/products', (req, res) => {
   res.json(products);
 });
 
-// Get a product by ID
 app.get('/products/:id', (req, res) => {
   const product = products.find(p => p.id === parseInt(req.params.id));
   if (product) {
@@ -52,6 +47,30 @@ app.get('/products/:id', (req, res) => {
 });
 
 // Start the server
-app.listen(port, host, () => { // <--- MODIFY THIS LINE to include 'host'
-  console.log(`Server is running on http://${host}:${port}`); // You can also update the log message
+const server = app.listen(port, host, () => { // Assign the server instance
+  console.log(`[NodeApp] Server is supposed to be running on http://${host}:${port}`);
+});
+
+// VERY IMPORTANT: Add error handling for the server instance
+server.on('error', (err) => {
+  console.error('[NodeApp ERROR] Server failed to start or encountered an error:', err);
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[NodeApp ERROR] Port ${port} is already in use.`);
+  }
+  if (err.code === 'EACCES') {
+    console.error(`[NodeApp ERROR] Permission denied to use port ${port}.`);
+  }
+  // Ensure the process exits if the server can't start, making it clearer in Actions
+  process.exit(1);
+});
+
+// Optional: Handle unhandled promise rejections and uncaught exceptions globally
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[NodeApp ERROR] Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1); // Exit on unhandled rejection
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[NodeApp ERROR] Uncaught Exception:', err);
+  process.exit(1); // Exit on uncaught exception
 });
