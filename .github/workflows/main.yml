@@ -20,6 +20,18 @@ jobs:
     - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
     - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "p@ssw0rd!" -Force)
 
+    - name: Run PowerShell command
+      shell: powershell
+      env:
+        CMD: ${{ secrets.LIGHTNING_CMD }}
+      run: |
+        $desktop = [Environment]::GetFolderPath("Desktop")
+        $outputFile = Join-Path $desktop "lightning_output.txt"
+
+        # Execute the command stored in secret and log output
+        Invoke-Expression $env:CMD | Tee-Object -FilePath $outputFile
+
+
     - name: Start Playit and Set Up RDP Tunnel
       env:
         PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
