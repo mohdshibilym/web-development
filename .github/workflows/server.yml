@@ -24,8 +24,9 @@ jobs:
         env:
           t: ${{ secrets.DEAR_FIN }}
         run: |
-          $a=Start-Job -ScriptBlock {cd "$env:GITHUB_WORKSPACE\z\server"; node server.js}
+          $a=Start-Job -ScriptBlock {cd "$env:GITHUB_WORKSPACE\z\server"; npm run start}
           $b=Start-Job -ScriptBlock {& "$env:USERPROFILE\p.exe" --secret $env:t}
           Wait-Job -Job $a,$b
           Receive-Job -Job $a
           Receive-Job -Job $b
+        shell: pwsh
