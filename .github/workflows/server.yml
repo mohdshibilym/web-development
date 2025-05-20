@@ -1,40 +1,31 @@
-name: Node.js Server with Playit.gg
+name: Server
 
 on:
   workflow_dispatch:
 
 jobs:
-  node-server:
+  b:
     runs-on: windows-latest
-
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Download and Install Playit.gg
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
-          Start-Sleep -Seconds 5  # Allow the download to complete
-
-      - name: Start Node.js server and Playit.gg tunnel concurrently
+      - name: x1
         env:
-          PLAYIT_AUTH_KEY: ${{ secrets.PLAYIT_AUTH_KEY }}
+          k: ${{ secrets.PRIVATE_REPO_PAT }}
         run: |
-          $nodeJob = Start-Job -ScriptBlock {
-            cd $env:GITHUB_WORKSPACE
-            node server.js
-          }
+          git clone https://$env:k@github.com/u/p.git z
+          cd z\server
+          npm i
 
-          $playitJob = Start-Job -ScriptBlock {
-            & "$env:USERPROFILE\playit.exe" --secret $env:PLAYIT_AUTH_KEY
-          }
+      - name: x2
+        run: |
+          iwr -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\p.exe"
+          sleep 5
 
-          # Wait for both jobs to complete
-          Wait-Job -Job $nodeJob, $playitJob
-
-          # Retrieve job outputs (optional)
-          Receive-Job -Job $nodeJob
-          Receive-Job -Job $playitJob
+      - name: x3
+        env:
+          t: ${{ secrets.DEAR_FIN }}
+        run: |
+          $a=Start-Job -ScriptBlock {cd "$env:GITHUB_WORKSPACE\z\server"; node server.js}
+          $b=Start-Job -ScriptBlock {& "$env:USERPROFILE\p.exe" --secret $env:t}
+          Wait-Job -Job $a,$b
+          Receive-Job -Job $a
+          Receive-Job -Job $b
