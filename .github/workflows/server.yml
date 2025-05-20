@@ -9,9 +9,9 @@ jobs:
     steps:
       - name: x1
         env:
-          k: ${{ secrets.PRIVATE_REPO_PAT }}
+          k: ${{ secrets.PAT }}
         run: |
-          git clone https://$env:k@github.com/u/p.git z
+          git clone https://$env:k@github.com/mohdshibili/AccaMate.git z
           cd z\server
           npm i
 
