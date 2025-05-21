@@ -28,7 +28,7 @@ jobs:
       - name: Write Caddyfile for custom domain
         run: |
           echo "test.dearfin.com {" > "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "  reverse_proxy localhost:3000" >> "$env:GITHUB_WORKSPACE\Caddyfile"
+          echo "  reverse_proxy http://islands-km.gl.at.ply.gg:46886" >> "$env:GITHUB_WORKSPACE\Caddyfile"
           echo "}" >> "$env:GITHUB_WORKSPACE\Caddyfile"
 
       - name: Start Node, Playit, and Caddy with visible logs
