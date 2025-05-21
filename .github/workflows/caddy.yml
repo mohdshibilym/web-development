@@ -1,0 +1,24 @@
+name: Server
+
+on:
+  workflow_dispatch:
+
+jobs:
+  b:
+    runs-on: windows-latest
+
+    steps:
+
+      - name: Download Caddy Executable
+        run: |
+          iwr -Uri "https://caddyserver.com/api/download?os=windows&arch=amd64" -OutFile "$env:USERPROFILE\caddy.exe"
+
+      - name: Write Caddyfile for custom domain
+        run: |
+          echo "app.example.com {" > "$env:GITHUB_WORKSPACE\Caddyfile"
+          echo "  reverse_proxy localhost:3000" >> "$env:GITHUB_WORKSPACE\Caddyfile"
+          echo "}" >> "$env:GITHUB_WORKSPACE\Caddyfile"
+
+      - name: Start Caddy Server
+        run: |
+          Start-Process -NoNewWindow -FilePath "$env:USERPROFILE\caddy.exe" -ArgumentList "run", "--config", "$env:GITHUB_WORKSPACE\Caddyfile", "--adapter", "caddyfile" -Wait
