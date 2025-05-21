@@ -1,4 +1,4 @@
-name: Server
+name: Server with Cloudflare Tunnel
 
 on:
   workflow_dispatch:
@@ -16,68 +16,36 @@ jobs:
           cd z\server
           npm i
 
-      - name: Download Playit Agent
+      - name: Download and install cloudflared
         run: |
-          iwr -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\p.exe"
-          sleep 5
-
-      - name: Download Caddy Executable
-        run: |
-          iwr -Uri "https://caddyserver.com/api/download?os=windows&arch=amd64" -OutFile "$env:USERPROFILE\caddy.exe"
-
-      - name: Write Caddyfile for custom domain
-        run: |
-          echo "{" > "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "  http_port 8080" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "  https_port 8443" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "}" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "test.dearfin.com {" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "  reverse_proxy localhost:3000" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "  tls internal" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "}" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-
-      - name: Start Node, Playit, and Caddy with visible logs
+          iwr -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
+          
+      - name: Start Node.js server and Cloudflare Tunnel
         env:
-          t: ${{ secrets.DEAR_FIN }}
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
         run: |
-          # Start processes in background but redirect output to files
+          # Start Node.js in background
           Start-Process -FilePath "npm" -ArgumentList "run", "start" -WorkingDirectory "$env:GITHUB_WORKSPACE\z\server" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\node.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\node-error.log" -NoNewWindow
-          Start-Process -FilePath "$env:USERPROFILE\p.exe" -ArgumentList "--secret", "$env:t" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\playit.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\playit-error.log" -NoNewWindow
-          Start-Process -FilePath "$env:USERPROFILE\caddy.exe" -ArgumentList "run", "--config", "$env:GITHUB_WORKSPACE\Caddyfile", "--adapter", "caddyfile" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\caddy.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\caddy-error.log" -NoNewWindow
           
-          # Wait a moment for processes to start
-          Start-Sleep -Seconds 10
+          # Give Node.js a moment to start
+          Start-Sleep -Seconds 5
           
-          # Create a loop to continuously display logs
+          # Start Cloudflare Tunnel
+          Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel", "run", "--token", "$env:CLOUDFLARE_TUNNEL_TOKEN" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\cloudflared.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\cloudflared-error.log" -NoNewWindow
+          
+          # Display logs
           while ($true) {
             Write-Host "===== NODE.JS SERVER LOGS ====="
             if (Test-Path "$env:GITHUB_WORKSPACE\node.log") {
               Get-Content -Path "$env:GITHUB_WORKSPACE\node.log" -Tail 20
             }
-            if (Test-Path "$env:GITHUB_WORKSPACE\node-error.log") {
-              Get-Content -Path "$env:GITHUB_WORKSPACE\node-error.log" -Tail 20
+            
+            Write-Host "===== CLOUDFLARE TUNNEL LOGS ====="
+            if (Test-Path "$env:GITHUB_WORKSPACE\cloudflared.log") {
+              Get-Content -Path "$env:GITHUB_WORKSPACE\cloudflared.log" -Tail 20
             }
             
-            Write-Host "===== PLAYIT AGENT LOGS ====="
-            if (Test-Path "$env:GITHUB_WORKSPACE\playit.log") {
-              Get-Content -Path "$env:GITHUB_WORKSPACE\playit.log" -Tail 20
-            }
-            if (Test-Path "$env:GITHUB_WORKSPACE\playit-error.log") {
-              Get-Content -Path "$env:GITHUB_WORKSPACE\playit-error.log" -Tail 20
-            }
-            
-            Write-Host "===== CADDY SERVER LOGS ====="
-            if (Test-Path "$env:GITHUB_WORKSPACE\caddy.log") {
-              Get-Content -Path "$env:GITHUB_WORKSPACE\caddy.log" -Tail 20
-            }
-            if (Test-Path "$env:GITHUB_WORKSPACE\caddy-error.log") {
-              Get-Content -Path "$env:GITHUB_WORKSPACE\caddy-error.log" -Tail 20
-            }
-            
-            # Keep the workflow running for a specified amount of time
-            # GitHub Actions will eventually time out on its own
-            # You can adjust this timeout as needed
+            # Sleep for 30 seconds before refreshing logs
             Start-Sleep -Seconds 30
           }
         shell: pwsh
