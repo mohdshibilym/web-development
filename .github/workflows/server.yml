@@ -25,22 +25,53 @@ jobs:
         run: |
           iwr -Uri "https://caddyserver.com/api/download?os=windows&arch=amd64" -OutFile "$env:USERPROFILE\caddy.exe"
 
-
       - name: Write Caddyfile for custom domain
         run: |
           echo "test.dearfin.com {" > "$env:GITHUB_WORKSPACE\Caddyfile"
           echo "  reverse_proxy localhost:3000" >> "$env:GITHUB_WORKSPACE\Caddyfile"
           echo "}" >> "$env:GITHUB_WORKSPACE\Caddyfile"
 
-      - name: Start Node, Playit, and Caddy
+      - name: Start Node, Playit, and Caddy with visible logs
         env:
           t: ${{ secrets.DEAR_FIN }}
         run: |
-          $job1 = Start-Job -ScriptBlock { cd "$env:GITHUB_WORKSPACE\z\server"; npm run start }
-          $job2 = Start-Job -ScriptBlock { & "$env:USERPROFILE\p.exe" --secret $env:t }
-          $job3 = Start-Job -ScriptBlock { & "$env:USERPROFILE\caddy.exe" run --config "$env:GITHUB_WORKSPACE\Caddyfile" --adapter caddyfile }
-          Wait-Job -Job $job1,$job2,$job3
-          Receive-Job -Job $job1
-          Receive-Job -Job $job2
-          Receive-Job -Job $job3
+          # Start processes in background but redirect output to files
+          Start-Process -FilePath "npm" -ArgumentList "run", "start" -WorkingDirectory "$env:GITHUB_WORKSPACE\z\server" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\node.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\node-error.log" -NoNewWindow
+          Start-Process -FilePath "$env:USERPROFILE\p.exe" -ArgumentList "--secret", "$env:t" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\playit.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\playit-error.log" -NoNewWindow
+          Start-Process -FilePath "$env:USERPROFILE\caddy.exe" -ArgumentList "run", "--config", "$env:GITHUB_WORKSPACE\Caddyfile", "--adapter", "caddyfile" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\caddy.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\caddy-error.log" -NoNewWindow
+          
+          # Wait a moment for processes to start
+          Start-Sleep -Seconds 10
+          
+          # Create a loop to continuously display logs
+          while ($true) {
+            Write-Host "===== NODE.JS SERVER LOGS ====="
+            if (Test-Path "$env:GITHUB_WORKSPACE\node.log") {
+              Get-Content -Path "$env:GITHUB_WORKSPACE\node.log" -Tail 20
+            }
+            if (Test-Path "$env:GITHUB_WORKSPACE\node-error.log") {
+              Get-Content -Path "$env:GITHUB_WORKSPACE\node-error.log" -Tail 20
+            }
+            
+            Write-Host "===== PLAYIT AGENT LOGS ====="
+            if (Test-Path "$env:GITHUB_WORKSPACE\playit.log") {
+              Get-Content -Path "$env:GITHUB_WORKSPACE\playit.log" -Tail 20
+            }
+            if (Test-Path "$env:GITHUB_WORKSPACE\playit-error.log") {
+              Get-Content -Path "$env:GITHUB_WORKSPACE\playit-error.log" -Tail 20
+            }
+            
+            Write-Host "===== CADDY SERVER LOGS ====="
+            if (Test-Path "$env:GITHUB_WORKSPACE\caddy.log") {
+              Get-Content -Path "$env:GITHUB_WORKSPACE\caddy.log" -Tail 20
+            }
+            if (Test-Path "$env:GITHUB_WORKSPACE\caddy-error.log") {
+              Get-Content -Path "$env:GITHUB_WORKSPACE\caddy-error.log" -Tail 20
+            }
+            
+            # Keep the workflow running for a specified amount of time
+            # GitHub Actions will eventually time out on its own
+            # You can adjust this timeout as needed
+            Start-Sleep -Seconds 30
+          }
         shell: pwsh
