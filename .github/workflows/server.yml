@@ -24,28 +24,41 @@ jobs:
         env:
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
         run: |
+          # Create logs directory
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\logs"
+          
           # Start Node.js in background
-          Start-Process -FilePath "npm" -ArgumentList "run", "start" -WorkingDirectory "$env:GITHUB_WORKSPACE\z\server" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\node.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\node-error.log" -NoNewWindow
+          Start-Process -FilePath "npm" -ArgumentList "run", "start" -WorkingDirectory "$env:GITHUB_WORKSPACE\z\server" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\node.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\node-error.log" -NoNewWindow
           
           # Give Node.js a moment to start
           Start-Sleep -Seconds 5
           
           # Start Cloudflare Tunnel
-          Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel", "run", "--protocol", "http2", "--token", "$env:CLOUDFLARE_TUNNEL_TOKEN" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\cloudflared.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\cloudflared-error.log" -NoNewWindow
+          Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel", "run", "--protocol", "http2", "--token", "$env:CLOUDFLARE_TUNNEL_TOKEN" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\cloudflared.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\cloudflared-error.log" -NoNewWindow
           
-          # Display logs
+          # Display logs continuously
           while ($true) {
             Write-Host "===== NODE.JS SERVER LOGS ====="
-            if (Test-Path "$env:GITHUB_WORKSPACE\node.log") {
-              Get-Content -Path "$env:GITHUB_WORKSPACE\node.log" -Tail 20
+            if (Test-Path "$env:GITHUB_WORKSPACE\logs\node.log") {
+              Get-Content -Path "$env:GITHUB_WORKSPACE\logs\node.log" -Tail 20
             }
             
             Write-Host "===== CLOUDFLARE TUNNEL LOGS ====="
-            if (Test-Path "$env:GITHUB_WORKSPACE\cloudflared.log") {
-              Get-Content -Path "$env:GITHUB_WORKSPACE\cloudflared.log" -Tail 20
+            if (Test-Path "$env:GITHUB_WORKSPACE\logs\cloudflared.log") {
+              Get-Content -Path "$env:GITHUB_WORKSPACE\logs\cloudflared.log" -Tail 20
             }
             
             # Sleep for 30 seconds before refreshing logs
             Start-Sleep -Seconds 30
           }
         shell: pwsh
+
+      # This step runs even if the previous step is cancelled or fails
+      - name: Save logs as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: |
+            logs/
+          retention-days: 30
