@@ -31,7 +31,7 @@ jobs:
           Start-Sleep -Seconds 5
           
           # Start Cloudflare Tunnel
-          Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel", "run", "--token", "$env:CLOUDFLARE_TUNNEL_TOKEN" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\cloudflared.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\cloudflared-error.log" -NoNewWindow
+          Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel", "run", "--protocol", "http2", "--token", "$env:CLOUDFLARE_TUNNEL_TOKEN" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\cloudflared.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\cloudflared-error.log" -NoNewWindow
           
           # Display logs
           while ($true) {
