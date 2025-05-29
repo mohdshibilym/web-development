@@ -1,30 +1,37 @@
-name: Caddy
+name: Simple Workflow
 
 on:
   workflow_dispatch:
 
 jobs:
-  b:
+  verify-secrets:
     runs-on: windows-latest
 
     steps:
-
-      - name: Download Caddy Executable
+      - name: Verify and print secrets
         run: |
-          iwr -Uri "https://caddyserver.com/api/download?os=windows&arch=amd64" -OutFile "$env:USERPROFILE\caddy.exe"
+          if ([string]::IsNullOrEmpty($env:k)) {
+            Write-Host "❌ PAT secret is not set"
+          } else {
+            Write-Host "✅ PAT secret is configured"
+            Write-Host "🔐 PAT: $($env:k)"
+          }
 
-      - name: Write Caddyfile for custom domain
-        run: |
-          echo "{" > "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "  http_port 8080" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "  https_port 8081" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "}" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "test.dearfin.com {" > "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "  reverse_proxy localhost:3000" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "  tls internal" >> "$env:GITHUB_WORKSPACE\Caddyfile"
-          echo "}" >> "$env:GITHUB_WORKSPACE\Caddyfile"
+          if ([string]::IsNullOrEmpty($env:CLOUDFLARE_TUNNEL_TOKEN)) {
+            Write-Host "❌ CLOUDFLARE_TUNNEL_TOKEN is not set"
+          } else {
+            Write-Host "✅ CLOUDFLARE_TUNNEL_TOKEN is configured"
+            Write-Host "🔐 CLOUDFLARE_TUNNEL_TOKEN: $($env:CLOUDFLARE_TUNNEL_TOKEN)"
+          }
 
-      - name: Start Caddy Server
-        run: |
-          Start-Process -NoNewWindow -FilePath "$env:USERPROFILE\caddy.exe" -ArgumentList "run", "--config", "$env:GITHUB_WORKSPACE\Caddyfile", "--adapter", "caddyfile" -Wait
+          if ([string]::IsNullOrEmpty($env:CLOUDFLARE_TUNNEL_TOKEN_1)) {
+            Write-Host "❌ CLOUDFLARE_TUNNEL_TOKEN_1 is not set"
+          } else {
+            Write-Host "✅ CLOUDFLARE_TUNNEL_TOKEN_1 is configured"
+            Write-Host "🔐 CLOUDFLARE_TUNNEL_TOKEN_1: $($env:CLOUDFLARE_TUNNEL_TOKEN_1)"
+          }
+        env:
+          k: ${{ secrets.PAT }}
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          CLOUDFLARE_TUNNEL_TOKEN_1: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN_1 }}
+        shell: pwsh
