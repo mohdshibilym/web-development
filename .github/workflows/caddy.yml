@@ -6,15 +6,3 @@ on:
 jobs:
   verify-secrets:
     runs-on: windows-latest
-
-    steps:
-      - name: Verify and print secrets (unmasked version for debugging only)
-        run: |
-          Write-Host "🔓 PAT (raw): $($env:RAW_PAT)"
-          Write-Host "🔓 CLOUDFLARE_TUNNEL_TOKEN (raw): $($env:RAW_CF1)"
-          Write-Host "🔓 CLOUDFLARE_TUNNEL_TOKEN_1 (raw): $($env:RAW_CF2)"
-        env:
-          RAW_PAT: ${{ secrets.PAT }}
-          RAW_CF1: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-          RAW_CF2: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN_1 }}
-        shell: pwsh
