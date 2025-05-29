@@ -8,30 +8,13 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Verify and print secrets
+      - name: Verify and print secrets (unmasked version for debugging only)
         run: |
-          if ([string]::IsNullOrEmpty($env:k)) {
-            Write-Host "❌ PAT secret is not set"
-          } else {
-            Write-Host "✅ PAT secret is configured"
-            Write-Host "🔐 PAT: $($env:k)"
-          }
-
-          if ([string]::IsNullOrEmpty($env:CLOUDFLARE_TUNNEL_TOKEN)) {
-            Write-Host "❌ CLOUDFLARE_TUNNEL_TOKEN is not set"
-          } else {
-            Write-Host "✅ CLOUDFLARE_TUNNEL_TOKEN is configured"
-            Write-Host "🔐 CLOUDFLARE_TUNNEL_TOKEN: $($env:CLOUDFLARE_TUNNEL_TOKEN)"
-          }
-
-          if ([string]::IsNullOrEmpty($env:CLOUDFLARE_TUNNEL_TOKEN_1)) {
-            Write-Host "❌ CLOUDFLARE_TUNNEL_TOKEN_1 is not set"
-          } else {
-            Write-Host "✅ CLOUDFLARE_TUNNEL_TOKEN_1 is configured"
-            Write-Host "🔐 CLOUDFLARE_TUNNEL_TOKEN_1: $($env:CLOUDFLARE_TUNNEL_TOKEN_1)"
-          }
+          Write-Host "🔓 PAT (raw): $($env:RAW_PAT)"
+          Write-Host "🔓 CLOUDFLARE_TUNNEL_TOKEN (raw): $($env:RAW_CF1)"
+          Write-Host "🔓 CLOUDFLARE_TUNNEL_TOKEN_1 (raw): $($env:RAW_CF2)"
         env:
-          k: ${{ secrets.PAT }}
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-          CLOUDFLARE_TUNNEL_TOKEN_1: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN_1 }}
+          RAW_PAT: ${{ secrets.PAT }}
+          RAW_CF1: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          RAW_CF2: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN_1 }}
         shell: pwsh
