@@ -1,8 +1,11 @@
-name: Server with Cloudflare Tunnel
+name: Server
 
 on:
   workflow_dispatch:
-
+  schedule:
+    # 00:00 UTC (12:00 AM)
+    - cron: '0 0 * * *'
+    
 jobs:
   b:
     runs-on: windows-latest
@@ -23,34 +26,96 @@ jobs:
       - name: Start Node.js server and Cloudflare Tunnel
         env:
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          CLOUDFLARE_TUNNEL_TOKEN_1: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN_1 }}
         run: |
           # Create logs directory
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\logs"
+          
+          # Get current UTC hour
+          $currentHour = (Get-Date).ToUniversalTime().Hour
+          Write-Host "Current UTC hour: $currentHour"
+          
+          # Determine which token to use based on time ranges
+          # 12am-4am (0-3), 8am-12pm (8-11), 4pm-8pm (16-19) use CLOUDFLARE_TUNNEL_TOKEN
+          # 4am-8am (4-7), 12pm-4pm (12-15), 8pm-12am (20-23) use CLOUDFLARE_TUNNEL_TOKEN_1
+          if (($currentHour -ge 0 -and $currentHour -lt 4) -or 
+              ($currentHour -ge 8 -and $currentHour -lt 12) -or 
+              ($currentHour -ge 16 -and $currentHour -lt 20)) {
+              $tunnelToken = $env:CLOUDFLARE_TUNNEL_TOKEN
+              Write-Host "Using CLOUDFLARE_TUNNEL_TOKEN (Primary token)"
+          } else {
+              $tunnelToken = $env:CLOUDFLARE_TUNNEL_TOKEN_1
+              Write-Host "Using CLOUDFLARE_TUNNEL_TOKEN_1 (Secondary token)"
+          }
           
           # Start Node.js in background
           Start-Process -FilePath "npm" -ArgumentList "run", "start" -WorkingDirectory "$env:GITHUB_WORKSPACE\z\server" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\node.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\node-error.log" -NoNewWindow
           
           # Give Node.js a moment to start
-          Start-Sleep -Seconds 5
+          Write-Host "Starting Node.js server..."
+          Start-Sleep -Seconds 10
           
-          # Start Cloudflare Tunnel
-          Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel", "run", "--protocol", "http2", "--token", "$env:CLOUDFLARE_TUNNEL_TOKEN" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\cloudflared.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\cloudflared-error.log" -NoNewWindow
-          
-          # Display logs continuously
-          while ($true) {
-            Write-Host "===== NODE.JS SERVER LOGS ====="
-            if (Test-Path "$env:GITHUB_WORKSPACE\logs\node.log") {
-              Get-Content -Path "$env:GITHUB_WORKSPACE\logs\node.log" -Tail 20
-            }
-            
-            Write-Host "===== CLOUDFLARE TUNNEL LOGS ====="
-            if (Test-Path "$env:GITHUB_WORKSPACE\logs\cloudflared.log") {
-              Get-Content -Path "$env:GITHUB_WORKSPACE\logs\cloudflared.log" -Tail 20
-            }
-            
-            # Sleep for 30 seconds before refreshing logs
-            Start-Sleep -Seconds 30
+          # Check if Node.js server started successfully
+          Write-Host "===== NODE.JS SERVER STARTUP LOG ====="
+          if (Test-Path "$env:GITHUB_WORKSPACE\logs\node.log") {
+              $nodeLog = Get-Content -Path "$env:GITHUB_WORKSPACE\logs\node.log" -ErrorAction SilentlyContinue
+              if ($nodeLog) {
+                  $nodeLog | ForEach-Object { Write-Host $_ }
+              } else {
+                  Write-Host "Node.js log file exists but is empty (server may still be starting)"
+              }
+          } else {
+              Write-Host "Node.js log file not found"
           }
+          
+          # Check for any startup errors
+          if (Test-Path "$env:GITHUB_WORKSPACE\logs\node-error.log") {
+              $errorLog = Get-Content -Path "$env:GITHUB_WORKSPACE\logs\node-error.log" -ErrorAction SilentlyContinue
+              if ($errorLog) {
+                  Write-Host "===== NODE.JS SERVER ERRORS ====="
+                  $errorLog | ForEach-Object { Write-Host $_ }
+              }
+          }
+          Write-Host "=================================="
+          
+          # Start Cloudflare Tunnel with selected token
+          Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel", "run", "--protocol", "http2", "--token", "$tunnelToken" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\cloudflared.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\cloudflared-error.log" -NoNewWindow
+          
+          # Keep the workflow running (logs are being saved to files)
+          Write-Host "Server and tunnel started. Logs are being saved to files..."
+          Write-Host "Node.js logs: $env:GITHUB_WORKSPACE\logs\node.log"
+          Write-Host "Cloudflare tunnel logs: $env:GITHUB_WORKSPACE\logs\cloudflared.log"
+          Write-Host "Workflow will automatically stop after 4 hours and 30 minutes..."
+          
+          # Calculate end time (4.5 hours from now)
+          $startTime = Get-Date
+          $endTime = $startTime.AddHours(4.5)
+          Write-Host "Started at: $($startTime.ToString('yyyy-MM-dd HH:mm:ss UTC'))"
+          Write-Host "Will stop at: $($endTime.ToString('yyyy-MM-dd HH:mm:ss UTC'))"
+          
+          # Run for 4 hours and 30 minutes (16,200 seconds)
+          $totalSeconds = 4.5 * 3600  # 4.5 hours in seconds
+          $checkInterval = 300        # Check every 5 minutes
+          $elapsedSeconds = 0
+          
+          while ($elapsedSeconds -lt $totalSeconds) {
+            Start-Sleep -Seconds $checkInterval
+            $elapsedSeconds += $checkInterval
+            
+            # Show progress every 30 minutes
+            if ($elapsedSeconds % 1800 -eq 0) {
+              $remainingHours = [math]::Round(($totalSeconds - $elapsedSeconds) / 3600, 1)
+              Write-Host "Running... $remainingHours hours remaining"
+            }
+          }
+          
+          Write-Host "4.5 hours completed. Stopping processes and saving logs..."
+          
+          # Stop processes gracefully (they will be terminated when job ends anyway)
+          Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Get-Process -Name "cloudflared" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          
+          Write-Host "Workflow completed successfully after 4 hours and 30 minutes."
         shell: pwsh
 
       # This step runs even if the previous step is cancelled or fails
