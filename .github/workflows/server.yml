@@ -2,9 +2,6 @@ name: Server
 
 on:
   workflow_dispatch:
-  schedule:
-    # 00:00 UTC (12:00 AM)
-    - cron: '0 0 * * *'
     
 jobs:
   b:
