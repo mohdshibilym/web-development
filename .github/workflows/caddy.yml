@@ -1,8 +1,0 @@
-name: Simple Workflow
-
-on:
-  workflow_dispatch:
-
-jobs:
-  verify-secrets:
-    runs-on: windows-latest
