@@ -83,12 +83,11 @@ TEMP_PATH = os.path.join(os.getcwd(), "temp")
 os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 os.makedirs(TEMP_PATH, exist_ok=True)
 
-# Global variables
+# Global variables - simplified to avoid loop conflicts
 bot_running = True
 active_downloads = {}
 transfer_locks = defaultdict(asyncio.Lock)
 download_semaphore = None
-shutdown_event = asyncio.Event()
 
 # FastAPI app for file server
 app_server = FastAPI(title="Telegram Bot File Server", description="Direct download server")
@@ -476,117 +475,76 @@ async def files_command(client, message: Message):
     await message.reply_text(files_text)
 
 def run_file_server():
-    """Run FastAPI server"""
+    """Run FastAPI server in isolated event loop"""
+    # Create new event loop for server thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     try:
-        uvicorn.run(app_server, host="0.0.0.0", port=8080, log_level="info")
+        uvicorn.run(app_server, host="0.0.0.0", port=8080, log_level="info", loop=loop)
     except Exception as e:
         logger.error(f"File server error: {e}")
+    finally:
+        loop.close()
 
-async def safe_shutdown():
-    """Safely shutdown all running tasks"""
-    global bot_running
-    bot_running = False
-    shutdown_event.set()
-    
-    logger.info("Starting safe shutdown...")
-    
-    try:
-        # Stop the Pyrogram client first
-        await app.stop()
-        logger.info("Pyrogram client stopped")
-    except Exception as e:
-        logger.error(f"Error stopping Pyrogram client: {e}")
-    
-    # Wait a moment for tasks to finish naturally
-    await asyncio.sleep(1)
-    
-    # Cancel remaining tasks safely
-    current_task = asyncio.current_task()
-    tasks = [task for task in asyncio.all_tasks() if task != current_task and not task.done()]
-    
-    if tasks:
-        logger.info(f"Cancelling {len(tasks)} remaining tasks...")
-        for task in tasks:
-            try:
-                task.cancel()
-            except Exception as e:
-                logger.error(f"Error cancelling task: {e}")
-        
-        # Wait for tasks to be cancelled, but don't wait forever
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True), 
-                timeout=5.0
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Some tasks did not cancel within timeout")
-        except Exception as e:
-            logger.error(f"Error during task cleanup: {e}")
-    
-    logger.info("Safe shutdown completed")
-
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    logger.info(f"Received signal {signum}, initiating shutdown...")
-    
-    # Create a new event loop if none exists
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    # Schedule the shutdown
-    if loop.is_running():
-        asyncio.create_task(safe_shutdown())
-    else:
-        loop.run_until_complete(safe_shutdown())
-
-async def main():
+def main():
+    """Main function - simplified to avoid asyncio conflicts"""
     global bot_running, download_semaphore
-    
-    # Initialize semaphore
-    download_semaphore = asyncio.Semaphore(OPTIMIZATION_CONFIG["max_concurrent_downloads"])
     
     logger.info("Starting Telegram Bot with File Server on GitHub Actions...")
     logger.info(f"Download Path: {DOWNLOAD_PATH}")
     logger.info(f"Tunnel URL: {TUNNEL_URL}")
     logger.info(f"File Server: Port 8080")
     
-    # Set up signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    # Start file server in background thread
+    # Start file server in background thread with isolated event loop
     server_thread = threading.Thread(target=run_file_server, daemon=True)
     server_thread.start()
     logger.info("File server started on port 8080")
     
+    # Wait for server to start
+    time.sleep(2)
+    
+    # Create main event loop for bot
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     try:
-        await app.start()
-        logger.info("Telegram bot started successfully!")
-        logger.info(f"Access files at: http://{TUNNEL_URL}")
+        # Initialize semaphore in main loop
+        download_semaphore = asyncio.Semaphore(OPTIMIZATION_CONFIG["max_concurrent_downloads"])
         
-        # Keep running until shutdown
-        while bot_running and not shutdown_event.is_set():
-            try:
-                await asyncio.wait_for(shutdown_event.wait(), timeout=1.0)
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                logger.error(f"Error in main loop: {e}")
-                break
-                
+        # Run bot
+        loop.run_until_complete(run_bot())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Error in main: {e}")
     finally:
-        await safe_shutdown()
+        logger.info("Bot shutdown complete")
+        loop.close()
+
+async def run_bot():
+    """Run the bot in isolated async context"""
+    try:
+        await app.start()
+        logger.info("Telegram bot started successfully!")
+        logger.info(f"Access files at: http://{TUNNEL_URL}")
+        
+        # Keep running - simple approach without event coordination
+        while bot_running:
+            await asyncio.sleep(1)
+            
+    except Exception as e:
+        logger.error(f"Error in bot: {e}")
+    finally:
+        try:
+            await app.stop()
+            logger.info("Pyrogram client stopped")
+        except Exception as e:
+            logger.error(f"Error stopping bot: {e}")
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         print("\nBot stopped by user")
     except Exception as e:
