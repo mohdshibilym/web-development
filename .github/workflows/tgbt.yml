@@ -1,91 +1,102 @@
-name: Telegram Bot with Playit Tunnel
+name: Telegram Bot with File Server and Playit Tunnel
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-bot-and-tunnel:
+  run-bot-server-playit:
     runs-on: windows-latest
     
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
-    
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.9'
 
-    - name: Set UTF-8 Environment
-      run: |
-        $env:PYTHONIOENCODING = "utf-8"
-        $env:PYTHONUTF8 = "1"
-        echo "PYTHONIOENCODING=utf-8" >> $env:GITHUB_ENV
-        echo "PYTHONUTF8=1" >> $env:GITHUB_ENV
-    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
     - name: Install Python Dependencies
       run: |
-        pip install pyrogram TgCrypto aiofiles aiohttp requests cryptg fastapi uvicorn python-multipart
-    
-    - name: Create Required Directories
+        python -m pip install --upgrade pip
+        pip install pyrogram TgCrypto aiofiles aiohttp requests cryptg
+
+    - name: Create Directories
       run: |
-        mkdir downloads -ErrorAction SilentlyContinue
-        mkdir temp -ErrorAction SilentlyContinue
-    
+        New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\downloads"
+        New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\temp"
+
     - name: Download and Install Playit
       run: |
         Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
         Start-Sleep -Seconds 5
-    
-    - name: Start Bot and Playit Tunnel Concurrently
+
+    - name: Run Bot, Server and Playit Together
       env:
         API_ID: ${{ secrets.API_ID }}
         API_HASH: ${{ secrets.API_HASH }}
         BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         PLAYIT_AUTH_KEY: ${{ secrets.DEAR_FIN }}
-        TUNNEL_URL: "islands-km.gl.at.ply.gg:46886"
-        PYTHONIOENCODING: "utf-8"
-        PYTHONUTF8: "1"
       run: |
-        # Start Telegram Bot in background
-        $env:PYTHONIOENCODING = "utf-8"
-        $env:PYTHONUTF8 = "1"
+        # Start Telegram Bot in background, redirect output
         Start-Process -FilePath "python" -ArgumentList "bot.py" -WorkingDirectory "$env:GITHUB_WORKSPACE" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\bot.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\bot-error.log" -NoNewWindow
+        
+        # Start Playit in background, redirect output
         Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret", "$env:PLAYIT_AUTH_KEY" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\playit.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\playit-error.log" -NoNewWindow
-        
-        # Wait for services to start
-        Start-Sleep -Seconds 15
-        
-        Write-Host "✅ Bot and tunnel started successfully!"
-        Write-Host "🤖 Bot logs: bot.log"
-        Write-Host "🌐 Tunnel logs: playit.log"
-        Write-Host "📁 Download path: downloads/"
-        Write-Host "🔗 Tunnel URL: islands-km.gl.at.ply.gg:46886"
 
-        Write-Host "🔄 Monitoring services..."
-        
-        # Monitor for 3 hours (10800 seconds)
-        $endTime = (Get-Date).AddSeconds(10800)
-        
-        while ((Get-Date) -lt $endTime) {
-         
-          # Show recent log entries
-          if (Test-Path "bot.log") {
-            Write-Host "`n📄 Recent bot activity:"
-            Get-Content "bot.log" -Tail 3 -ErrorAction SilentlyContinue
+        # Wait for services to initialize
+        Start-Sleep -Seconds 15
+
+        Write-Host "🚀 Bot, Server and Playit started successfully!"
+        Write-Host "📱 Telegram Bot: Running with file server integration"
+        Write-Host "🌐 File Server: http://localhost:8080"
+        Write-Host "🔗 Public URL: http://islands-km.gl.at.ply.gg:46886"
+        Write-Host "🔄 Playit Tunnel: Active"
+
+        # Monitor logs and keep services running
+        while ($true) {
+          Write-Host ""
+          Write-Host "===== TELEGRAM BOT LOGS ====="
+          if (Test-Path "$env:GITHUB_WORKSPACE\bot.log") {
+            Get-Content -Path "$env:GITHUB_WORKSPACE\bot.log" -Tail 20
+          } else {
+            Write-Host "Bot log file not found"
           }
           
-          if (Test-Path "playit.log") {
-            Write-Host "`n🌐 Recent tunnel activity:"
-            Get-Content "playit.log" -Tail 3 -ErrorAction SilentlyContinue
+          if (Test-Path "$env:GITHUB_WORKSPACE\bot-error.log") {
+            $errorContent = Get-Content -Path "$env:GITHUB_WORKSPACE\bot-error.log" -Tail 10
+            if ($errorContent) {
+              Write-Host "⚠️ BOT ERRORS:"
+              $errorContent | ForEach-Object { Write-Host $_ }
+            }
+          }
+
+          Write-Host ""
+          Write-Host "===== PLAYIT AGENT LOGS ====="
+          if (Test-Path "$env:GITHUB_WORKSPACE\playit.log") {
+            Get-Content -Path "$env:GITHUB_WORKSPACE\playit.log" -Tail 20
+          } else {
+            Write-Host "Playit log file not found"
           }
           
-          Write-Host "`n⏰ Waiting... ($(((Get-Date) - $endTime).TotalSeconds * -1) seconds remaining)"
-          Start-Sleep -Seconds 30  # Check every 30 seconds
+          if (Test-Path "$env:GITHUB_WORKSPACE\playit-error.log") {
+            $playitErrors = Get-Content -Path "$env:GITHUB_WORKSPACE\playit-error.log" -Tail 10
+            if ($playitErrors) {
+              Write-Host "⚠️ PLAYIT ERRORS:"
+              $playitErrors | ForEach-Object { Write-Host $_ }
+            }
+          }
+
+          Write-Host ""
+          Write-Host "===== SERVICE STATUS ====="
+          Write-Host "🤖 Bot Process: $(if (Get-Process python -ErrorAction SilentlyContinue) {'Running ✅'} else {'Stopped ❌'})"
+          Write-Host "🔗 Playit Process: $(if (Get-Process playit -ErrorAction SilentlyContinue) {'Running ✅'} else {'Stopped ❌'})"
+          Write-Host "📊 Downloaded Files: $(if (Test-Path '$env:GITHUB_WORKSPACE\downloads') {(Get-ChildItem '$env:GITHUB_WORKSPACE\downloads' -File).Count} else {0})"
+          
+          Start-Sleep -Seconds 30
         }
-        
-        Write-Host "`n🛑 Session time limit reached. Stopping services..."
-    
+      shell: pwsh
+      
     - name: Upload Logs
       if: always()
       uses: actions/upload-artifact@v4
