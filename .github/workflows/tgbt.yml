@@ -15,6 +15,13 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.9'
+
+    - name: Set UTF-8 Environment
+      run: |
+        $env:PYTHONIOENCODING = "utf-8"
+        $env:PYTHONUTF8 = "1"
+        echo "PYTHONIOENCODING=utf-8" >> $env:GITHUB_ENV
+        echo "PYTHONUTF8=1" >> $env:GITHUB_ENV
     
     - name: Install Python Dependencies
       run: |
@@ -37,8 +44,12 @@ jobs:
         BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         PLAYIT_AUTH_KEY: ${{ secrets.DEAR_FIN }}
         TUNNEL_URL: "islands-km.gl.at.ply.gg:46886"
+        PYTHONIOENCODING: "utf-8"
+        PYTHONUTF8: "1"
       run: |
         # Start Telegram Bot in background
+        $env:PYTHONIOENCODING = "utf-8"
+        $env:PYTHONUTF8 = "1"
         Start-Process -FilePath "python" -ArgumentList "bot.py" -WorkingDirectory "$env:GITHUB_WORKSPACE" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\bot.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\bot-error.log" -NoNewWindow
         Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret", "$env:PLAYIT_AUTH_KEY" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\playit.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\playit-error.log" -NoNewWindow
         
