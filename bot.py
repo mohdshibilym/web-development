@@ -1,4 +1,5 @@
-# High-Speed Telegram Download Bot with File Server for GitHub Actions
+# High-Speed Telegram Download Bot for GitHub Actions with File Server
+
 import asyncio
 import time
 import os
@@ -12,85 +13,106 @@ import tempfile
 import shutil
 import concurrent.futures
 from pathlib import Path
+import inspect
 import math
 import hashlib
 from collections import defaultdict
 import threading
-import urllib.parse
+import http.server
+import socketserver
+from urllib.parse import quote
 
-# FastAPI for file server
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-import uvicorn
+# Install required packages
+"""
+pip install pyrogram TgCrypto aiofiles aiohttp requests cryptg
+"""
 
-# Pyrogram imports
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import aiofiles
 
-# Get credentials from environment
-API_ID = os.environ.get("API_ID")
-API_HASH = os.environ.get("API_HASH")  
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-TUNNEL_URL = os.environ.get("TUNNEL_URL", "islands-km.gl.at.ply.gg:46886")
+# Configuration
+API_ID = os.getenv("API_ID", "12345678")
+API_HASH = os.getenv("API_HASH", "your_api_hash_here")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "your_bot_token_here")
 
-# Verify credentials
-if not all([API_ID, API_HASH, BOT_TOKEN]):
-    print("ERROR: Missing credentials! Please check GitHub secrets.")
-    print(f"API_ID: {'OK' if API_ID else 'MISSING'}")
-    print(f"API_HASH: {'OK' if API_HASH else 'MISSING'}")
-    print(f"BOT_TOKEN: {'OK' if BOT_TOKEN else 'MISSING'}")
-    sys.exit(1)
-
-# Configuration optimized for GitHub Actions
-OPTIMIZATION_CONFIG = {
-    "workers": 8,
-    "ipv6": False,
-    "proxy": None,
-    "test_mode": False,
-    "chunk_size": 1 * 1024 * 1024,
-    "max_concurrent_downloads": 2,
-    "max_connections_per_download": 5,
-    "use_temp_files": True,
-    "buffer_size": 8192,
-    "max_retries": 3,
-    "retry_delay": 2,
-    "progress_update_interval": 2.0,
-}
-
-# Setup logging with UTF-8 encoding
-log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# Console handler with UTF-8
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(log_formatter)
-logger.addHandler(console_handler)
-
-# File handler with UTF-8
-try:
-    file_handler = logging.FileHandler('bot.log', encoding='utf-8')
-    file_handler.setFormatter(log_formatter)
-    logger.addHandler(file_handler)
-except Exception as e:
-    print(f"Could not create file handler: {e}")
-
-# Paths for GitHub Actions runner
+# GitHub Actions paths
 DOWNLOAD_PATH = os.path.join(os.getcwd(), "downloads")
 TEMP_PATH = os.path.join(os.getcwd(), "temp")
 os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 os.makedirs(TEMP_PATH, exist_ok=True)
 
-# Global variables - simplified to avoid loop conflicts
+# Server configuration
+SERVER_PORT = 8080
+PUBLIC_URL = "http://islands-km.gl.at.ply.gg:46886"
+
+# Maximum number of parallel connections
+MAX_CONNECTIONS = 20
+
+# Advanced Configuration for Speed Optimization
+OPTIMIZATION_CONFIG = {
+    "workers": 32,
+    "ipv6": False,
+    "proxy": None,
+    "test_mode": False,
+    "chunk_size": 2 * 1024 * 1024,
+    "max_concurrent_downloads": 5,
+    "max_connections_per_download": 20,
+    "use_temp_files": True,
+    "buffer_size": 16384,
+    "max_retries": 5,
+    "retry_delay": 1,
+    "progress_update_interval": 1.0,
+}
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Global variables
 bot_running = True
 active_downloads = {}
 transfer_locks = defaultdict(asyncio.Lock)
-download_semaphore = None
+server_thread = None
 
-# FastAPI app for file server
-app_server = FastAPI(title="Telegram Bot File Server", description="Direct download server")
+class FileServer:
+    """HTTP File Server to serve downloaded files"""
+    
+    def __init__(self, directory, port):
+        self.directory = directory
+        self.port = port
+        self.httpd = None
+        
+    def start_server(self):
+        """Start the HTTP server in a separate thread"""
+        os.chdir(self.directory)
+        
+        class CustomHandler(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, format, *args):
+                # Reduce server logs
+                pass
+                
+            def end_headers(self):
+                # Add CORS headers
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                super().end_headers()
+        
+        Handler = CustomHandler
+        self.httpd = socketserver.TCPServer(("", self.port), Handler)
+        
+        print(f"🌐 File server started on port {self.port}")
+        print(f"📂 Serving files from: {self.directory}")
+        print(f"🔗 Public URL: {PUBLIC_URL}")
+        
+        self.httpd.serve_forever()
+    
+    def stop_server(self):
+        """Stop the HTTP server"""
+        if self.httpd:
+            self.httpd.shutdown()
+            self.httpd.server_close()
 
 class AdvancedSpeedTracker:
     def __init__(self):
@@ -101,6 +123,7 @@ class AdvancedSpeedTracker:
         self.speed_history = []
         self.last_progress_time = 0
         self.peak_speed = 0
+        self.chunk_times = []
 
     def start_download(self, total_size):
         self.start_time = time.time()
@@ -110,6 +133,7 @@ class AdvancedSpeedTracker:
         self.speed_history = []
         self.last_progress_time = 0
         self.peak_speed = 0
+        self.chunk_times = []
 
     def update_progress(self, current_bytes, total_bytes):
         now = time.time()
@@ -125,28 +149,32 @@ class AdvancedSpeedTracker:
                 
                 if speed > self.peak_speed:
                     self.peak_speed = speed
-                    
-                if len(self.speed_history) > 10:
-                    self.speed_history = self.speed_history[-10:]
-        
+                
+                if len(self.speed_history) > 20:
+                    self.speed_history = self.speed_history[-20:]
+
         self.last_update = now
 
     def get_advanced_stats(self):
         if not self.start_time:
             return None
-        
+
         elapsed = time.time() - self.start_time
         if elapsed == 0:
             return None
-        
+
         avg_speed = self.downloaded_bytes / elapsed if elapsed > 0 else 0
+        
         recent_speeds = [s[2] for s in self.speed_history[-3:] if s[2] > 0]
         current_speed = sum(recent_speeds) / len(recent_speeds) if recent_speeds else avg_speed
         
+        smooth_speeds = [s[2] for s in self.speed_history[-10:] if s[2] > 0]
+        smooth_speed = sum(smooth_speeds) / len(smooth_speeds) if smooth_speeds else avg_speed
+        
         progress = (self.downloaded_bytes / self.total_bytes) * 100 if self.total_bytes > 0 else 0
         remaining_bytes = self.total_bytes - self.downloaded_bytes
-        eta_seconds = remaining_bytes / current_speed if current_speed > 0 else 0
-        
+        eta_seconds = remaining_bytes / smooth_speed if smooth_speed > 0 else 0
+
         return {
             'elapsed': elapsed,
             'progress': progress,
@@ -154,16 +182,61 @@ class AdvancedSpeedTracker:
             'total': self.total_bytes,
             'avg_speed': avg_speed,
             'current_speed': current_speed,
+            'smooth_speed': smooth_speed,
             'peak_speed': self.peak_speed,
             'eta': eta_seconds
         }
+
+def format_bytes(bytes_value):
+    """Convert bytes to human readable format"""
+    if bytes_value == 0:
+        return "0 B"
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes_value < 1024.0:
+            return f"{bytes_value:.1f} {unit}"
+        bytes_value /= 1024.0
+    return f"{bytes_value:.1f} TB"
+
+def format_speed(bytes_per_second):
+    """Convert bytes per second to human readable format"""
+    return f"{format_bytes(bytes_per_second)}/s"
+
+def format_time(seconds):
+    """Convert seconds to human readable format"""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        return f"{seconds/60:.1f}m"
+    else:
+        return f"{seconds/3600:.1f}h"
+
+def generate_download_url(filename):
+    """Generate download URL for the file"""
+    encoded_filename = quote(filename)
+    return f"{PUBLIC_URL}/{encoded_filename}"
+
+# Initialize optimized Pyrogram client
+app = Client(
+    "speed_optimized_session",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    workers=OPTIMIZATION_CONFIG["workers"],
+    ipv6=OPTIMIZATION_CONFIG["ipv6"],
+    proxy=OPTIMIZATION_CONFIG["proxy"],
+    test_mode=OPTIMIZATION_CONFIG["test_mode"]
+)
+
+download_semaphore = asyncio.Semaphore(OPTIMIZATION_CONFIG["max_concurrent_downloads"])
 
 class OptimizedDownloader:
     def __init__(self, client: Client):
         self.client = client
         self.speed_tracker = AdvancedSpeedTracker()
+        self.status_msg = None
 
-    async def download_with_retry(self, message: Message, file_path: str, max_retries: int = 3):
+    async def download_with_retry(self, message: Message, file_path: str, max_retries: int = 5):
+        """Download with retry logic"""
         for attempt in range(max_retries):
             try:
                 return await self._download_optimized(message, file_path)
@@ -175,6 +248,7 @@ class OptimizedDownloader:
                     raise e
 
     async def _download_optimized(self, message: Message, file_path: str):
+        """Optimized download method"""
         if OPTIMIZATION_CONFIG["use_temp_files"]:
             temp_file = os.path.join(TEMP_PATH, f"temp_{message.id}_{int(time.time())}")
             try:
@@ -203,36 +277,149 @@ class OptimizedDownloader:
             )
 
     async def progress_callback(self, current, total):
+        """Progress callback with Telegram updates"""
         self.speed_tracker.update_progress(current, total)
         stats = self.speed_tracker.get_advanced_stats()
         
         if stats and stats['elapsed'] > 0:
             current_time = time.time()
             if current_time - self.speed_tracker.last_progress_time >= OPTIMIZATION_CONFIG["progress_update_interval"]:
-                logger.info(f"Progress: {stats['progress']:.1f}% | Speed: {format_speed(stats['current_speed'])} | ETA: {format_time(stats['eta'])}")
+                print(f"\r📊 {stats['progress']:.1f}% | "
+                      f"💨 {format_speed(stats['current_speed'])} | "
+                      f"📈 Peak: {format_speed(stats['peak_speed'])} | "
+                      f"📦 {format_bytes(stats['downloaded'])}/{format_bytes(stats['total'])} | "
+                      f"⏱️ ETA: {format_time(stats['eta'])}", end="", flush=True)
+                
+                # Update Telegram status every 5 seconds
+                if self.status_msg and current_time - self.speed_tracker.last_progress_time >= 5:
+                    try:
+                        await self.status_msg.edit_text(
+                            f"🚀 **Downloading to Server**\n\n"
+                            f"📊 **Progress:** {stats['progress']:.1f}%\n"
+                            f"💨 **Speed:** {format_speed(stats['current_speed'])}\n"
+                            f"📈 **Peak:** {format_speed(stats['peak_speed'])}\n"
+                            f"📦 **Downloaded:** {format_bytes(stats['downloaded'])}/{format_bytes(stats['total'])}\n"
+                            f"⏱️ **ETA:** {format_time(stats['eta'])}\n"
+                            f"🔄 **Status:** Downloading..."
+                        )
+                    except:
+                        pass
+                
                 self.speed_tracker.last_progress_time = current_time
 
-def format_bytes(bytes_value):
-    if bytes_value == 0:
-        return "0 B"
-    for unit in ['B', 'KB', 'MB', 'GB']:
-        if bytes_value < 1024.0:
-            return f"{bytes_value:.1f} {unit}"
-        bytes_value /= 1024.0
-    return f"{bytes_value:.1f} TB"
+@app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
+async def handle_optimized_download(client, message: Message):
+    """Handle file download with server integration"""
+    async with download_semaphore:
+        try:
+            user_name = message.from_user.first_name if message.from_user else "Unknown"
+            print(f"\n🚀 High-speed download started by {user_name}")
 
-def format_speed(bytes_per_second):
-    return f"{format_bytes(bytes_per_second)}/s"
+            file_obj, file_name, file_size = get_file_info(message)
+            if not file_obj:
+                await message.reply_text("❌ Unsupported file type")
+                return
 
-def format_time(seconds):
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    elif seconds < 3600:
-        return f"{seconds/60:.1f}m"
-    else:
-        return f"{seconds/3600:.1f}h"
+            print(f"📁 File: {file_name}")
+            print(f"📊 Size: {format_bytes(file_size)}")
+
+            if file_size > 4 * 1024 * 1024 * 1024:  # 4GB
+                await message.reply_text("❌ File too large (>4GB)")
+                return
+
+            if file_size == 0:
+                await message.reply_text("⚠️ Cannot determine file size")
+                return
+
+            safe_filename = sanitize_filename(file_name)
+            file_path = os.path.join(DOWNLOAD_PATH, safe_filename)
+
+            # Status message
+            status_msg = await message.reply_text(
+                f"🚀 **Download Starting**\n\n"
+                f"📁 **File:** {file_name}\n"
+                f"📊 **Size:** {format_bytes(file_size)}\n"
+                f"🌐 **Server:** {PUBLIC_URL}\n"
+                f"⚙️ **Workers:** {OPTIMIZATION_CONFIG['workers']}\n"
+                f"🔄 **Status:** Initializing..."
+            )
+
+            download_id = f"{message.chat.id}_{message.id}"
+            active_downloads[download_id] = {
+                'start_time': time.time(),
+                'file_name': file_name,
+                'file_size': file_size
+            }
+
+            downloader = OptimizedDownloader(client)
+            downloader.status_msg = status_msg
+            downloader.speed_tracker.start_download(file_size)
+
+            download_start = time.time()
+
+            try:
+                downloaded_file = await downloader.download_with_retry(
+                    message,
+                    file_path,
+                    OPTIMIZATION_CONFIG["max_retries"]
+                )
+
+                download_end = time.time()
+                download_time = download_end - download_start
+
+                if downloaded_file and os.path.exists(downloaded_file):
+                    actual_size = os.path.getsize(downloaded_file)
+                    stats = downloader.speed_tracker.get_advanced_stats()
+                    
+                    # Generate download URL
+                    download_url = generate_download_url(safe_filename)
+                    
+                    print(f"\n\n✅ High-speed download completed!")
+                    print(f"📁 File: {downloaded_file}")
+                    print(f"🔗 URL: {download_url}")
+                    print(f"📊 Size: {format_bytes(actual_size)}")
+                    print(f"⏱️ Time: {format_time(download_time)}")
+
+                    # Success message with download URL
+                    await status_msg.edit_text(
+                        f"✅ **Download Complete!**\n\n"
+                        f"📁 **File:** {file_name}\n"
+                        f"📊 **Size:** {format_bytes(actual_size)}\n"
+                        f"⏱️ **Time:** {format_time(download_time)}\n"
+                        f"🚄 **Avg Speed:** {format_speed(stats['avg_speed'])}\n"
+                        f"💨 **Peak Speed:** {format_speed(stats['peak_speed'])}\n"
+                        f"🌐 **Server:** Ready\n\n"
+                        f"🔗 **Download URL:**\n`{download_url}`\n\n"
+                        f"💡 Click the URL to download the file!"
+                    )
+                    
+                    # Send download URL as a separate clickable message
+                    await message.reply_text(
+                        f"🔗 **Direct Download Link:**\n\n{download_url}\n\n"
+                        f"📋 **Instructions:**\n"
+                        f"• Click the link to download\n"
+                        f"• Share this URL with others\n"
+                        f"• Link is valid while server is running"
+                    )
+
+                else:
+                    print(f"❌ Download failed - file not found")
+                    await status_msg.edit_text("❌ Download failed")
+
+            except Exception as download_error:
+                print(f"❌ Download error: {download_error}")
+                await status_msg.edit_text(f"❌ Download failed: {str(download_error)}")
+
+            finally:
+                if download_id in active_downloads:
+                    del active_downloads[download_id]
+
+        except Exception as e:
+            print(f"❌ Error in optimized download: {e}")
+            await message.reply_text(f"❌ Error: {str(e)}")
 
 def get_file_info(message: Message):
+    """Extract file information from message"""
     if message.document:
         return message.document, message.document.file_name or f"document_{message.id}", message.document.file_size or 0
     elif message.video:
@@ -245,186 +432,73 @@ def get_file_info(message: Message):
     return None, None, 0
 
 def sanitize_filename(filename: str) -> str:
+    """Create a safe filename"""
     safe_name = "".join(c for c in filename if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
     return safe_name if safe_name and safe_name != "." else f"file_{int(time.time())}"
 
-def create_download_link(filename: str) -> str:
-    encoded_filename = urllib.parse.quote(filename)
-    return f"http://{TUNNEL_URL}/download/{encoded_filename}"
-
-# FastAPI Routes
-@app_server.get("/")
-async def root():
-    files = []
-    if os.path.exists(DOWNLOAD_PATH):
-        for file in os.listdir(DOWNLOAD_PATH):
-            if os.path.isfile(os.path.join(DOWNLOAD_PATH, file)):
-                size = os.path.getsize(os.path.join(DOWNLOAD_PATH, file))
-                files.append({
-                    "name": file, 
-                    "size": format_bytes(size), 
-                    "download_link": f"/download/{urllib.parse.quote(file)}"
-                })
-    
-    return {
-        "message": "Telegram Bot File Server - Running on GitHub Actions",
-        "tunnel_url": TUNNEL_URL,
-        "files": files,
-        "total_files": len(files)
-    }
-
-@app_server.get("/download/{filename}")
-async def download_file(filename: str):
-    filename = urllib.parse.unquote(filename)
-    file_path = os.path.join(DOWNLOAD_PATH, filename)
-    
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    return FileResponse(
-        path=file_path,
-        filename=filename,
-        media_type='application/octet-stream'
-    )
-
-@app_server.get("/files")
-async def list_files():
-    files = []
-    if os.path.exists(DOWNLOAD_PATH):
-        for file in os.listdir(DOWNLOAD_PATH):
-            file_path = os.path.join(DOWNLOAD_PATH, file)
-            if os.path.isfile(file_path):
-                size = os.path.getsize(file_path)
-                files.append({
-                    "name": file,
-                    "size": size,
-                    "size_formatted": format_bytes(size),
-                    "download_url": f"http://{TUNNEL_URL}/download/{urllib.parse.quote(file)}"
-                })
-    return {"files": files}
-
-# Initialize Pyrogram client
-app = Client(
-    "github_bot_session",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-    workers=OPTIMIZATION_CONFIG["workers"],
-    ipv6=OPTIMIZATION_CONFIG["ipv6"],
-    proxy=OPTIMIZATION_CONFIG["proxy"],
-    test_mode=OPTIMIZATION_CONFIG["test_mode"]
-)
-
-@app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
-async def handle_download_with_link(client, message: Message):
-    global download_semaphore
-    if download_semaphore is None:
-        download_semaphore = asyncio.Semaphore(OPTIMIZATION_CONFIG["max_concurrent_downloads"])
-        
-    async with download_semaphore:
-        try:
-            user_name = message.from_user.first_name if message.from_user else "Unknown"
-            logger.info(f"Download started by {user_name}")
-            
-            file_obj, file_name, file_size = get_file_info(message)
-            if not file_obj:
-                await message.reply_text("ERROR: Unsupported file type")
-                return
-            
-            logger.info(f"File: {file_name}, Size: {format_bytes(file_size)}")
-            
-            if file_size > 2 * 1024 * 1024 * 1024:  # 2GB limit
-                await message.reply_text("ERROR: File too large for GitHub Actions (>2GB)")
-                return
-            
-            if file_size == 0:
-                await message.reply_text("WARNING: Cannot determine file size")
-                return
-            
-            safe_filename = sanitize_filename(file_name)
-            file_path = os.path.join(DOWNLOAD_PATH, safe_filename)
-            
-            status_msg = await message.reply_text(
-                f"**Download Starting**\n\n"
-                f"File: {file_name}\n"
-                f"Size: {format_bytes(file_size)}\n"
-                f"GitHub Actions Runner"
-            )
-            
-            download_id = f"{message.chat.id}_{message.id}"
-            active_downloads[download_id] = {
-                'start_time': time.time(),
-                'file_name': file_name,
-                'file_size': file_size
-            }
-            
-            downloader = OptimizedDownloader(client)
-            downloader.speed_tracker.start_download(file_size)
-            download_start = time.time()
-            
-            try:
-                downloaded_file = await downloader.download_with_retry(
-                    message,
-                    file_path,
-                    OPTIMIZATION_CONFIG["max_retries"]
-                )
-                
-                download_end = time.time()
-                download_time = download_end - download_start
-                
-                if downloaded_file and os.path.exists(downloaded_file):
-                    actual_size = os.path.getsize(downloaded_file)
-                    stats = downloader.speed_tracker.get_advanced_stats()
-                    
-                    download_link = create_download_link(safe_filename)
-                    
-                    logger.info(f"Download completed: {downloaded_file}")
-                    logger.info(f"Direct link: {download_link}")
-                    
-                    await status_msg.edit_text(
-                        f"**Download Complete!**\n\n"
-                        f"**File:** {file_name}\n"
-                        f"**Size:** {format_bytes(actual_size)}\n"
-                        f"**Time:** {format_time(download_time)}\n"
-                        f"**Avg Speed:** {format_speed(stats['avg_speed'])}\n\n"
-                        f"**Direct Download:**\n"
-                        f"`{download_link}`\n\n"
-                        f"**Access files at:** `http://{TUNNEL_URL}`"
-                    )
-                    
-                else:
-                    await status_msg.edit_text("ERROR: Download failed")
-                    
-            except Exception as download_error:
-                logger.error(f"Download error: {download_error}")
-                await status_msg.edit_text(f"ERROR: Download failed: {str(download_error)}")
-            finally:
-                if download_id in active_downloads:
-                    del active_downloads[download_id]
-                    
-        except Exception as e:
-            logger.error(f"Error: {e}")
-            await message.reply_text(f"ERROR: {str(e)}")
-
 @app.on_message(filters.command("start"))
 async def start_command(client, message: Message):
+    """Enhanced start command"""
     await message.reply_text(
-        f"**GitHub Actions Telegram Bot**\n\n"
-        f"**Running on GitHub Actions**\n"
-        f"**Tunnel:** `{TUNNEL_URL}`\n"
-        f"**Workers:** {OPTIMIZATION_CONFIG['workers']}\n\n"
-        f"**Send files to get direct download links!**\n\n"
-        f"**Commands:**\n"
+        f"🚀 **High-Speed Telegram Download Bot**\n\n"
+        f"⚡ **Server Integration:**\n"
+        f"• Files served at: {PUBLIC_URL}\n"
+        f"• Port: {SERVER_PORT}\n"
+        f"• Auto-generates download URLs\n\n"
+        f"⚡ **Optimizations Active:**\n"
+        f"• {OPTIMIZATION_CONFIG['workers']} worker threads\n"
+        f"• {OPTIMIZATION_CONFIG['max_connections_per_download']} parallel connections\n"
+        f"• {format_bytes(OPTIMIZATION_CONFIG['chunk_size'])} chunk size\n"
+        f"• Advanced retry logic\n"
+        f"• Real-time progress updates\n\n"
+        f"📤 **Send any file to get download URL!**\n\n"
+        f"📋 **Commands:**\n"
         f"/start - Show this message\n"
-        f"/status - Check status\n"
-        f"/files - List files with links"
+        f"/status - Check downloads & server\n"
+        f"/files - List available files\n"
+        f"/clear - Clear downloads\n"
+        f"/stop - Stop bot"
     )
+
+@app.on_message(filters.command("files"))
+async def files_command(client, message: Message):
+    """List available files with download URLs"""
+    try:
+        files = []
+        if os.path.exists(DOWNLOAD_PATH):
+            for file in os.listdir(DOWNLOAD_PATH):
+                file_path = os.path.join(DOWNLOAD_PATH, file)
+                if os.path.isfile(file_path):
+                    size = os.path.getsize(file_path)
+                    url = generate_download_url(file)
+                    files.append((file, size, url))
+
+        if not files:
+            await message.reply_text("📁 **No files available**\n\nUpload files to the bot first!")
+            return
+
+        files_text = f"📁 **Available Files ({len(files)})**\n\n"
+        
+        for i, (filename, size, url) in enumerate(files[:10]):  # Show max 10 files
+            display_name = filename[:30] + "..." if len(filename) > 30 else filename
+            files_text += f"**{i+1}.** {display_name}\n"
+            files_text += f"📊 Size: {format_bytes(size)}\n"
+            files_text += f"🔗 URL: `{url}`\n\n"
+
+        if len(files) > 10:
+            files_text += f"... and {len(files) - 10} more files\n"
+
+        await message.reply_text(files_text)
+
+    except Exception as e:
+        await message.reply_text(f"❌ Error listing files: {str(e)}")
 
 @app.on_message(filters.command("status"))
 async def status_command(client, message: Message):
-    files = []
-    total_size = 0
+    """Enhanced status with server information"""
     try:
+        files = []
+        total_size = 0
         if os.path.exists(DOWNLOAD_PATH):
             for file in os.listdir(DOWNLOAD_PATH):
                 file_path = os.path.join(DOWNLOAD_PATH, file)
@@ -432,122 +506,108 @@ async def status_command(client, message: Message):
                     size = os.path.getsize(file_path)
                     files.append((file, size))
                     total_size += size
+
+        active_count = len(active_downloads)
+        status_text = f"📊 **Bot & Server Status**\n\n"
+        status_text += f"🌐 **File Server:**\n"
+        status_text += f"• URL: {PUBLIC_URL}\n"
+        status_text += f"• Port: {SERVER_PORT}\n"
+        status_text += f"• Status: Running ✅\n\n"
+        status_text += f"📁 **Storage:**\n"
+        status_text += f"• Files: {len(files)}\n"
+        status_text += f"• Total Size: {format_bytes(total_size)}\n"
+        status_text += f"• Path: ./downloads/\n\n"
+        status_text += f"🔄 **Active Downloads:** {active_count}\n"
+        status_text += f"⚙️ **Workers:** {OPTIMIZATION_CONFIG['workers']}\n\n"
+
+        if active_downloads:
+            status_text += "**Active Downloads:**\n"
+            for download_id, info in active_downloads.items():
+                elapsed = time.time() - info['start_time']
+                status_text += f"• {info['file_name'][:25]}... ({format_time(elapsed)})\n"
+
+        await message.reply_text(status_text)
+
     except Exception as e:
-        await message.reply_text(f"ERROR: {str(e)}")
-        return
-    
-    status_text = f"**Bot Status**\n\n"
-    status_text += f"**Server:** `{TUNNEL_URL}`\n"
-    status_text += f"**Files:** {len(files)} ({format_bytes(total_size)})\n"
-    status_text += f"**Active:** {len(active_downloads)}\n"
-    status_text += f"**Platform:** GitHub Actions\n\n"
-    
-    if files:
-        status_text += "**Recent Files:**\n"
-        for file, size in files[-3:]:
-            display_name = file[:20] + "..." if len(file) > 20 else file
-            status_text += f"• {display_name} ({format_bytes(size)})\n"
-    
-    await message.reply_text(status_text)
+        await message.reply_text(f"❌ Error getting status: {str(e)}")
 
-@app.on_message(filters.command("files"))
-async def files_command(client, message: Message):
-    files = []
-    if os.path.exists(DOWNLOAD_PATH):
-        for file in os.listdir(DOWNLOAD_PATH):
-            file_path = os.path.join(DOWNLOAD_PATH, file)
-            if os.path.isfile(file_path):
-                size = os.path.getsize(file_path)
-                download_link = create_download_link(file)
-                files.append((file, size, download_link))
-    
-    if not files:
-        await message.reply_text("No files available")
-        return
-    
-    files_text = f"**Available Files:**\n\n"
-    for file, size, link in files[-5:]:
-        display_name = file[:25] + "..." if len(file) > 25 else file
-        files_text += f"**{display_name}**\n"
-        files_text += f"{format_bytes(size)}\n"
-        files_text += f"`{link}`\n\n"
-    
-    await message.reply_text(files_text)
-
-def run_file_server():
-    """Run FastAPI server in isolated event loop"""
-    # Create new event loop for server thread
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
+@app.on_message(filters.command("clear"))
+async def clear_command(client, message: Message):
+    """Clear downloaded files"""
     try:
-        uvicorn.run(app_server, host="0.0.0.0", port=8080, log_level="info", loop=loop)
-    except Exception as e:
-        logger.error(f"File server error: {e}")
-    finally:
-        loop.close()
+        count = 0
+        total_freed = 0
+        if os.path.exists(DOWNLOAD_PATH):
+            for file in os.listdir(DOWNLOAD_PATH):
+                file_path = os.path.join(DOWNLOAD_PATH, file)
+                if os.path.isfile(file_path):
+                    size = os.path.getsize(file_path)
+                    os.remove(file_path)
+                    count += 1
+                    total_freed += size
 
-def main():
-    """Main function - simplified to avoid asyncio conflicts"""
-    global bot_running, download_semaphore
+        await message.reply_text(
+            f"🗑️ **Cleanup Complete**\n\n"
+            f"📁 Files deleted: {count}\n"
+            f"💾 Space freed: {format_bytes(total_freed)}"
+        )
+
+    except Exception as e:
+        await message.reply_text(f"❌ Cleanup failed: {str(e)}")
+
+@app.on_message(filters.command("stop"))
+async def stop_command(client, message: Message):
+    """Stop the bot"""
+    global bot_running
+    await message.reply_text("🛑 **Bot stopping...**\n\nServer will remain active. Goodbye! 👋")
+    bot_running = False
+    print("\n🛑 Bot stop requested by user")
+
+def signal_handler(signum, frame):
+    """Handle Ctrl+C gracefully"""
+    global bot_running
+    print(f"\n🛑 Received signal {signum}, stopping bot...")
+    bot_running = False
+
+async def main():
+    """Main function with server integration"""
+    global bot_running, server_thread
     
-    logger.info("Starting Telegram Bot with File Server on GitHub Actions...")
-    logger.info(f"Download Path: {DOWNLOAD_PATH}")
-    logger.info(f"Tunnel URL: {TUNNEL_URL}")
-    logger.info(f"File Server: Port 8080")
-    
-    # Start file server in background thread with isolated event loop
-    server_thread = threading.Thread(target=run_file_server, daemon=True)
+    print("🚀 Starting High-Speed Telegram Download Bot with File Server...")
+    print(f"📁 Downloads: {DOWNLOAD_PATH}")
+    print(f"📁 Temp: {TEMP_PATH}")
+    print(f"🌐 Server: {PUBLIC_URL}")
+    print(f"🔌 Port: {SERVER_PORT}")
+
+    # Start file server in background thread
+    file_server = FileServer(DOWNLOAD_PATH, SERVER_PORT)
+    server_thread = threading.Thread(target=file_server.start_server, daemon=True)
     server_thread.start()
-    logger.info("File server started on port 8080")
     
-    # Wait for server to start
-    time.sleep(2)
-    
-    # Create main event loop for bot
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        # Initialize semaphore in main loop
-        download_semaphore = asyncio.Semaphore(OPTIMIZATION_CONFIG["max_concurrent_downloads"])
-        
-        # Run bot
-        loop.run_until_complete(run_bot())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Error in main: {e}")
-    finally:
-        logger.info("Bot shutdown complete")
-        loop.close()
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
-async def run_bot():
-    """Run the bot in isolated async context"""
     try:
         await app.start()
-        logger.info("Telegram bot started successfully!")
-        logger.info(f"Access files at: http://{TUNNEL_URL}")
-        
-        # Keep running - simple approach without event coordination
+        print("✅ Bot started successfully!")
+        print("📱 Send files to get download URLs")
+        print("⏹️ Press Ctrl+C to stop")
+
         while bot_running:
             await asyncio.sleep(1)
-            
+
+    except KeyboardInterrupt:
+        print("\n⏹️ Bot stopped by user (Ctrl+C)")
     except Exception as e:
-        logger.error(f"Error in bot: {e}")
+        print(f"❌ Error: {e}")
+        logger.exception("Bot error")
     finally:
         try:
             await app.stop()
-            logger.info("Pyrogram client stopped")
+            print("👋 Bot stopped gracefully")
         except Exception as e:
-            logger.error(f"Error stopping bot: {e}")
+            print(f"⚠️ Error stopping bot: {e}")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nBot stopped by user")
-    except Exception as e:
-        print(f"Fatal error: {e}")
-    finally:
-        print("Bot shutdown complete")
+    import asyncio
+    asyncio.run(main())
