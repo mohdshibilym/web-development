@@ -16,6 +16,14 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Set UTF-8 Encoding
+      run: |
+        [Environment]::SetEnvironmentVariable("PYTHONIOENCODING", "utf-8", "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONLEGACYWINDOWSSTDIO", "1", "Process")
+        # Set console to UTF-8
+        chcp 65001
+      shell: pwsh
+
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
@@ -37,7 +45,12 @@ jobs:
         API_HASH: ${{ secrets.API_HASH }}
         BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         PLAYIT_AUTH_KEY: ${{ secrets.DEAR_FIN }}
+        PYTHONIOENCODING: utf-8
+        PYTHONLEGACYWINDOWSSTDIO: 1
       run: |
+        # Set UTF-8 encoding for this session
+        chcp 65001
+        
         # Start Telegram Bot in background, redirect output
         Start-Process -FilePath "python" -ArgumentList "bot.py" -WorkingDirectory "$env:GITHUB_WORKSPACE" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\bot.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\bot-error.log" -NoNewWindow
         
@@ -47,26 +60,26 @@ jobs:
         # Wait for services to initialize
         Start-Sleep -Seconds 15
 
-        Write-Host "🚀 Bot, Server and Playit started successfully!"
-        Write-Host "📱 Telegram Bot: Running with file server integration"
-        Write-Host "🌐 File Server: http://localhost:8080"
-        Write-Host "🔗 Public URL: http://islands-km.gl.at.ply.gg:46886"
-        Write-Host "🔄 Playit Tunnel: Active"
+        Write-Host "[SUCCESS] Bot, Server and Playit started successfully!"
+        Write-Host "[INFO] Telegram Bot: Running with file server integration"
+        Write-Host "[INFO] File Server: http://localhost:8080"
+        Write-Host "[INFO] Public URL: http://islands-km.gl.at.ply.gg:46886"
+        Write-Host "[INFO] Playit Tunnel: Active"
 
         # Monitor logs and keep services running
         while ($true) {
           Write-Host ""
           Write-Host "===== TELEGRAM BOT LOGS ====="
           if (Test-Path "$env:GITHUB_WORKSPACE\bot.log") {
-            Get-Content -Path "$env:GITHUB_WORKSPACE\bot.log" -Tail 20
+            Get-Content -Path "$env:GITHUB_WORKSPACE\bot.log" -Tail 20 -Encoding UTF8
           } else {
             Write-Host "Bot log file not found"
           }
           
           if (Test-Path "$env:GITHUB_WORKSPACE\bot-error.log") {
-            $errorContent = Get-Content -Path "$env:GITHUB_WORKSPACE\bot-error.log" -Tail 10
+            $errorContent = Get-Content -Path "$env:GITHUB_WORKSPACE\bot-error.log" -Tail 10 -Encoding UTF8
             if ($errorContent) {
-              Write-Host "⚠️ BOT ERRORS:"
+              Write-Host "[WARNING] BOT ERRORS:"
               $errorContent | ForEach-Object { Write-Host $_ }
             }
           }
@@ -74,24 +87,24 @@ jobs:
           Write-Host ""
           Write-Host "===== PLAYIT AGENT LOGS ====="
           if (Test-Path "$env:GITHUB_WORKSPACE\playit.log") {
-            Get-Content -Path "$env:GITHUB_WORKSPACE\playit.log" -Tail 20
+            Get-Content -Path "$env:GITHUB_WORKSPACE\playit.log" -Tail 20 -Encoding UTF8
           } else {
             Write-Host "Playit log file not found"
           }
           
           if (Test-Path "$env:GITHUB_WORKSPACE\playit-error.log") {
-            $playitErrors = Get-Content -Path "$env:GITHUB_WORKSPACE\playit-error.log" -Tail 10
+            $playitErrors = Get-Content -Path "$env:GITHUB_WORKSPACE\playit-error.log" -Tail 10 -Encoding UTF8
             if ($playitErrors) {
-              Write-Host "⚠️ PLAYIT ERRORS:"
+              Write-Host "[WARNING] PLAYIT ERRORS:"
               $playitErrors | ForEach-Object { Write-Host $_ }
             }
           }
 
           Write-Host ""
           Write-Host "===== SERVICE STATUS ====="
-          Write-Host "🤖 Bot Process: $(if (Get-Process python -ErrorAction SilentlyContinue) {'Running ✅'} else {'Stopped ❌'})"
-          Write-Host "🔗 Playit Process: $(if (Get-Process playit -ErrorAction SilentlyContinue) {'Running ✅'} else {'Stopped ❌'})"
-          Write-Host "📊 Downloaded Files: $(if (Test-Path '$env:GITHUB_WORKSPACE\downloads') {(Get-ChildItem '$env:GITHUB_WORKSPACE\downloads' -File).Count} else {0})"
+          Write-Host "[STATUS] Bot Process: $(if (Get-Process python -ErrorAction SilentlyContinue) {'Running'} else {'Stopped'})"
+          Write-Host "[STATUS] Playit Process: $(if (Get-Process playit -ErrorAction SilentlyContinue) {'Running'} else {'Stopped'})"
+          Write-Host "[STATUS] Downloaded Files: $(if (Test-Path '$env:GITHUB_WORKSPACE\downloads') {(Get-ChildItem '$env:GITHUB_WORKSPACE\downloads' -File).Count} else {0})"
           
           Start-Sleep -Seconds 30
         }
