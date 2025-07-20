@@ -67,8 +67,6 @@ logger.setLevel(logging.INFO)
 # Console handler with UTF-8
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(log_formatter)
-if hasattr(console_handler.stream, 'reconfigure'):
-    console_handler.stream.reconfigure(encoding='utf-8')
 logger.addHandler(console_handler)
 
 # File handler with UTF-8
@@ -78,9 +76,6 @@ try:
     logger.addHandler(file_handler)
 except Exception as e:
     print(f"Could not create file handler: {e}")
-
-# Set environment variable for UTF-8 encoding
-os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # Paths for GitHub Actions runner
 DOWNLOAD_PATH = os.path.join(os.getcwd(), "downloads")
@@ -92,7 +87,8 @@ os.makedirs(TEMP_PATH, exist_ok=True)
 bot_running = True
 active_downloads = {}
 transfer_locks = defaultdict(asyncio.Lock)
-download_semaphore = asyncio.Semaphore(OPTIMIZATION_CONFIG["max_concurrent_downloads"])
+download_semaphore = None
+shutdown_event = asyncio.Event()
 
 # FastAPI app for file server
 app_server = FastAPI(title="Telegram Bot File Server", description="Direct download server")
@@ -322,6 +318,10 @@ app = Client(
 
 @app.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo))
 async def handle_download_with_link(client, message: Message):
+    global download_semaphore
+    if download_semaphore is None:
+        download_semaphore = asyncio.Semaphore(OPTIMIZATION_CONFIG["max_concurrent_downloads"])
+        
     async with download_semaphore:
         try:
             user_name = message.from_user.first_name if message.from_user else "Unknown"
@@ -334,7 +334,6 @@ async def handle_download_with_link(client, message: Message):
             
             logger.info(f"File: {file_name}, Size: {format_bytes(file_size)}")
             
-            # GitHub Actions has storage limits
             if file_size > 2 * 1024 * 1024 * 1024:  # 2GB limit
                 await message.reply_text("ERROR: File too large for GitHub Actions (>2GB)")
                 return
@@ -478,15 +477,85 @@ async def files_command(client, message: Message):
 
 def run_file_server():
     """Run FastAPI server"""
-    uvicorn.run(app_server, host="0.0.0.0", port=8080, log_level="info")
+    try:
+        uvicorn.run(app_server, host="0.0.0.0", port=8080, log_level="info")
+    except Exception as e:
+        logger.error(f"File server error: {e}")
+
+async def safe_shutdown():
+    """Safely shutdown all running tasks"""
+    global bot_running
+    bot_running = False
+    shutdown_event.set()
+    
+    logger.info("Starting safe shutdown...")
+    
+    try:
+        # Stop the Pyrogram client first
+        await app.stop()
+        logger.info("Pyrogram client stopped")
+    except Exception as e:
+        logger.error(f"Error stopping Pyrogram client: {e}")
+    
+    # Wait a moment for tasks to finish naturally
+    await asyncio.sleep(1)
+    
+    # Cancel remaining tasks safely
+    current_task = asyncio.current_task()
+    tasks = [task for task in asyncio.all_tasks() if task != current_task and not task.done()]
+    
+    if tasks:
+        logger.info(f"Cancelling {len(tasks)} remaining tasks...")
+        for task in tasks:
+            try:
+                task.cancel()
+            except Exception as e:
+                logger.error(f"Error cancelling task: {e}")
+        
+        # Wait for tasks to be cancelled, but don't wait forever
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True), 
+                timeout=5.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Some tasks did not cancel within timeout")
+        except Exception as e:
+            logger.error(f"Error during task cleanup: {e}")
+    
+    logger.info("Safe shutdown completed")
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    logger.info(f"Received signal {signum}, initiating shutdown...")
+    
+    # Create a new event loop if none exists
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    # Schedule the shutdown
+    if loop.is_running():
+        asyncio.create_task(safe_shutdown())
+    else:
+        loop.run_until_complete(safe_shutdown())
 
 async def main():
-    global bot_running
+    global bot_running, download_semaphore
+    
+    # Initialize semaphore
+    download_semaphore = asyncio.Semaphore(OPTIMIZATION_CONFIG["max_concurrent_downloads"])
     
     logger.info("Starting Telegram Bot with File Server on GitHub Actions...")
     logger.info(f"Download Path: {DOWNLOAD_PATH}")
     logger.info(f"Tunnel URL: {TUNNEL_URL}")
     logger.info(f"File Server: Port 8080")
+    
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
     # Start file server in background thread
     server_thread = threading.Thread(target=run_file_server, daemon=True)
@@ -498,36 +567,29 @@ async def main():
         logger.info("Telegram bot started successfully!")
         logger.info(f"Access files at: http://{TUNNEL_URL}")
         
-        # Keep running
-        while bot_running:
-            await asyncio.sleep(1)
-            
+        # Keep running until shutdown
+        while bot_running and not shutdown_event.is_set():
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Error in main loop: {e}")
+                break
+                
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
-        bot_running = False
     except Exception as e:
-        logger.error(f"Error: {e}")
-        bot_running = False
+        logger.error(f"Error in main: {e}")
     finally:
-        try:
-            # Cancel all running tasks
-            tasks = [task for task in asyncio.all_tasks() if not task.done()]
-            for task in tasks:
-                task.cancel()
-            
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-            
-            await app.stop()
-            logger.info("Bot stopped gracefully")
-        except Exception as e:
-            logger.error(f"Error stopping bot: {e}")
+        await safe_shutdown()
 
 if __name__ == "__main__":
-    # Set UTF-8 encoding for Windows
-    if sys.platform.startswith('win'):
-        import codecs
-        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer)
-        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer)
-    
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nBot stopped by user")
+    except Exception as e:
+        print(f"Fatal error: {e}")
+    finally:
+        print("Bot shutdown complete")
