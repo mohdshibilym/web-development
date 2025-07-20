@@ -40,11 +40,6 @@ jobs:
       run: |
         # Start Telegram Bot in background
         Start-Process -FilePath "python" -ArgumentList "bot.py" -WorkingDirectory "$env:GITHUB_WORKSPACE" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\bot.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\bot-error.log" -NoNewWindow
-        
-        # Wait a few seconds for bot to initialize
-        Start-Sleep -Seconds 10
-        
-        # Start Playit tunnel in background
         Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret", "$env:PLAYIT_AUTH_KEY" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\playit.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\playit-error.log" -NoNewWindow
         
         # Wait for services to start
@@ -55,35 +50,14 @@ jobs:
         Write-Host "🌐 Tunnel logs: playit.log"
         Write-Host "📁 Download path: downloads/"
         Write-Host "🔗 Tunnel URL: islands-km.gl.at.ply.gg:46886"
-    
-    - name: Monitor Services and Keep Alive
-      run: |
+
         Write-Host "🔄 Monitoring services..."
-        
-        # Function to check if processes are running
-        function Check-Processes {
-          $pythonRunning = Get-Process python -ErrorAction SilentlyContinue
-          $playitRunning = Get-Process playit* -ErrorAction SilentlyContinue
-          
-          if ($pythonRunning) {
-            Write-Host "✅ Bot is running (PID: $($pythonRunning.Id))"
-          } else {
-            Write-Host "❌ Bot is not running"
-          }
-          
-          if ($playitRunning) {
-            Write-Host "✅ Tunnel is running (PID: $($playitRunning.Id))"
-          } else {
-            Write-Host "❌ Tunnel is not running"
-          }
-        }
         
         # Monitor for 3 hours (10800 seconds)
         $endTime = (Get-Date).AddSeconds(10800)
         
         while ((Get-Date) -lt $endTime) {
-          Check-Processes
-          
+         
           # Show recent log entries
           if (Test-Path "bot.log") {
             Write-Host "`n📄 Recent bot activity:"
@@ -96,7 +70,7 @@ jobs:
           }
           
           Write-Host "`n⏰ Waiting... ($(((Get-Date) - $endTime).TotalSeconds * -1) seconds remaining)"
-          Start-Sleep -Seconds 300  # Check every 5 minutes
+          Start-Sleep -Seconds 30  # Check every 30 seconds
         }
         
         Write-Host "`n🛑 Session time limit reached. Stopping services..."
