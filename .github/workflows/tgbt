@@ -1,0 +1,113 @@
+name: Telegram Bot with Playit Tunnel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-bot-and-tunnel:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install Python Dependencies
+      run: |
+        pip install pyrogram TgCrypto aiofiles aiohttp requests cryptg fastapi uvicorn python-multipart
+    
+    - name: Create Required Directories
+      run: |
+        mkdir downloads -ErrorAction SilentlyContinue
+        mkdir temp -ErrorAction SilentlyContinue
+    
+    - name: Download and Install Playit
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\playit.exe"
+        Start-Sleep -Seconds 5
+    
+    - name: Start Bot and Playit Tunnel Concurrently
+      env:
+        API_ID: ${{ secrets.API_ID }}
+        API_HASH: ${{ secrets.API_HASH }}
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        PLAYIT_AUTH_KEY: ${{ secrets.DEAR_FIN }}
+        TUNNEL_URL: "islands-km.gl.at.ply.gg:46886"
+      run: |
+        # Start Telegram Bot in background
+        Start-Process -FilePath "python" -ArgumentList "bot.py" -WorkingDirectory "$env:GITHUB_WORKSPACE" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\bot.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\bot-error.log" -NoNewWindow
+        
+        # Wait a few seconds for bot to initialize
+        Start-Sleep -Seconds 10
+        
+        # Start Playit tunnel in background
+        Start-Process -FilePath "$env:USERPROFILE\playit.exe" -ArgumentList "--secret", "$env:PLAYIT_AUTH_KEY" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\playit.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\playit-error.log" -NoNewWindow
+        
+        # Wait for services to start
+        Start-Sleep -Seconds 15
+        
+        Write-Host "✅ Bot and tunnel started successfully!"
+        Write-Host "🤖 Bot logs: bot.log"
+        Write-Host "🌐 Tunnel logs: playit.log"
+        Write-Host "📁 Download path: downloads/"
+        Write-Host "🔗 Tunnel URL: islands-km.gl.at.ply.gg:46886"
+    
+    - name: Monitor Services and Keep Alive
+      run: |
+        Write-Host "🔄 Monitoring services..."
+        
+        # Function to check if processes are running
+        function Check-Processes {
+          $pythonRunning = Get-Process python -ErrorAction SilentlyContinue
+          $playitRunning = Get-Process playit* -ErrorAction SilentlyContinue
+          
+          if ($pythonRunning) {
+            Write-Host "✅ Bot is running (PID: $($pythonRunning.Id))"
+          } else {
+            Write-Host "❌ Bot is not running"
+          }
+          
+          if ($playitRunning) {
+            Write-Host "✅ Tunnel is running (PID: $($playitRunning.Id))"
+          } else {
+            Write-Host "❌ Tunnel is not running"
+          }
+        }
+        
+        # Monitor for 3 hours (10800 seconds)
+        $endTime = (Get-Date).AddSeconds(10800)
+        
+        while ((Get-Date) -lt $endTime) {
+          Check-Processes
+          
+          # Show recent log entries
+          if (Test-Path "bot.log") {
+            Write-Host "`n📄 Recent bot activity:"
+            Get-Content "bot.log" -Tail 3 -ErrorAction SilentlyContinue
+          }
+          
+          if (Test-Path "playit.log") {
+            Write-Host "`n🌐 Recent tunnel activity:"
+            Get-Content "playit.log" -Tail 3 -ErrorAction SilentlyContinue
+          }
+          
+          Write-Host "`n⏰ Waiting... ($(((Get-Date) - $endTime).TotalSeconds * -1) seconds remaining)"
+          Start-Sleep -Seconds 300  # Check every 5 minutes
+        }
+        
+        Write-Host "`n🛑 Session time limit reached. Stopping services..."
+    
+    - name: Upload Logs
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: service-logs
+        path: |
+          bot.log
+          bot-error.log
+          playit.log
+          playit-error.log
