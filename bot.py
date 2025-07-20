@@ -37,20 +37,20 @@ TUNNEL_URL = os.environ.get("TUNNEL_URL", "islands-km.gl.at.ply.gg:46886")
 
 # Verify credentials
 if not all([API_ID, API_HASH, BOT_TOKEN]):
-    print("❌ Missing credentials! Please check GitHub secrets.")
-    print(f"API_ID: {'✅' if API_ID else '❌'}")
-    print(f"API_HASH: {'✅' if API_HASH else '❌'}")
-    print(f"BOT_TOKEN: {'✅' if BOT_TOKEN else '❌'}")
+    print("ERROR: Missing credentials! Please check GitHub secrets.")
+    print(f"API_ID: {'OK' if API_ID else 'MISSING'}")
+    print(f"API_HASH: {'OK' if API_HASH else 'MISSING'}")
+    print(f"BOT_TOKEN: {'OK' if BOT_TOKEN else 'MISSING'}")
     sys.exit(1)
 
 # Configuration optimized for GitHub Actions
 OPTIMIZATION_CONFIG = {
-    "workers": 8,  # Reduced for GitHub Actions limits
+    "workers": 8,
     "ipv6": False,
     "proxy": None,
     "test_mode": False,
-    "chunk_size": 1 * 1024 * 1024,  # 1MB chunks
-    "max_concurrent_downloads": 2,   # Reduced for memory limits
+    "chunk_size": 1 * 1024 * 1024,
+    "max_concurrent_downloads": 2,
     "max_connections_per_download": 5,
     "use_temp_files": True,
     "buffer_size": 8192,
@@ -59,23 +59,28 @@ OPTIMIZATION_CONFIG = {
     "progress_update_interval": 2.0,
 }
 
-# Setup logging with file output
+# Setup logging with UTF-8 encoding
 log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Console handler
+# Console handler with UTF-8
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(log_formatter)
+if hasattr(console_handler.stream, 'reconfigure'):
+    console_handler.stream.reconfigure(encoding='utf-8')
 logger.addHandler(console_handler)
 
-# File handler
+# File handler with UTF-8
 try:
     file_handler = logging.FileHandler('bot.log', encoding='utf-8')
     file_handler.setFormatter(log_formatter)
     logger.addHandler(file_handler)
-except:
-    pass
+except Exception as e:
+    print(f"Could not create file handler: {e}")
+
+# Set environment variable for UTF-8 encoding
+os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # Paths for GitHub Actions runner
 DOWNLOAD_PATH = os.path.join(os.getcwd(), "downloads")
@@ -324,28 +329,28 @@ async def handle_download_with_link(client, message: Message):
             
             file_obj, file_name, file_size = get_file_info(message)
             if not file_obj:
-                await message.reply_text("❌ Unsupported file type")
+                await message.reply_text("ERROR: Unsupported file type")
                 return
             
             logger.info(f"File: {file_name}, Size: {format_bytes(file_size)}")
             
             # GitHub Actions has storage limits
             if file_size > 2 * 1024 * 1024 * 1024:  # 2GB limit
-                await message.reply_text("❌ File too large for GitHub Actions (>2GB)")
+                await message.reply_text("ERROR: File too large for GitHub Actions (>2GB)")
                 return
             
             if file_size == 0:
-                await message.reply_text("⚠️ Cannot determine file size")
+                await message.reply_text("WARNING: Cannot determine file size")
                 return
             
             safe_filename = sanitize_filename(file_name)
             file_path = os.path.join(DOWNLOAD_PATH, safe_filename)
             
             status_msg = await message.reply_text(
-                f"🚀 **Download Starting**\n\n"
-                f"📁 {file_name}\n"
-                f"📊 {format_bytes(file_size)}\n"
-                f"🔧 GitHub Actions Runner"
+                f"**Download Starting**\n\n"
+                f"File: {file_name}\n"
+                f"Size: {format_bytes(file_size)}\n"
+                f"GitHub Actions Runner"
             )
             
             download_id = f"{message.chat.id}_{message.id}"
@@ -379,39 +384,39 @@ async def handle_download_with_link(client, message: Message):
                     logger.info(f"Direct link: {download_link}")
                     
                     await status_msg.edit_text(
-                        f"✅ **Download Complete!**\n\n"
-                        f"📁 **File:** {file_name}\n"
-                        f"📊 **Size:** {format_bytes(actual_size)}\n"
-                        f"⏱️ **Time:** {format_time(download_time)}\n"
-                        f"🚄 **Avg Speed:** {format_speed(stats['avg_speed'])}\n\n"
-                        f"🔗 **Direct Download:**\n"
+                        f"**Download Complete!**\n\n"
+                        f"**File:** {file_name}\n"
+                        f"**Size:** {format_bytes(actual_size)}\n"
+                        f"**Time:** {format_time(download_time)}\n"
+                        f"**Avg Speed:** {format_speed(stats['avg_speed'])}\n\n"
+                        f"**Direct Download:**\n"
                         f"`{download_link}`\n\n"
-                        f"🌐 **Access files at:** `http://{TUNNEL_URL}`"
+                        f"**Access files at:** `http://{TUNNEL_URL}`"
                     )
                     
                 else:
-                    await status_msg.edit_text("❌ Download failed")
+                    await status_msg.edit_text("ERROR: Download failed")
                     
             except Exception as download_error:
                 logger.error(f"Download error: {download_error}")
-                await status_msg.edit_text(f"❌ Download failed: {str(download_error)}")
+                await status_msg.edit_text(f"ERROR: Download failed: {str(download_error)}")
             finally:
                 if download_id in active_downloads:
                     del active_downloads[download_id]
                     
         except Exception as e:
             logger.error(f"Error: {e}")
-            await message.reply_text(f"❌ Error: {str(e)}")
+            await message.reply_text(f"ERROR: {str(e)}")
 
 @app.on_message(filters.command("start"))
 async def start_command(client, message: Message):
     await message.reply_text(
-        f"🚀 **GitHub Actions Telegram Bot**\n\n"
-        f"⚡ **Running on GitHub Actions**\n"
-        f"🌐 **Tunnel:** `{TUNNEL_URL}`\n"
-        f"📊 **Workers:** {OPTIMIZATION_CONFIG['workers']}\n\n"
-        f"📤 **Send files to get direct download links!**\n\n"
-        f"📋 **Commands:**\n"
+        f"**GitHub Actions Telegram Bot**\n\n"
+        f"**Running on GitHub Actions**\n"
+        f"**Tunnel:** `{TUNNEL_URL}`\n"
+        f"**Workers:** {OPTIMIZATION_CONFIG['workers']}\n\n"
+        f"**Send files to get direct download links!**\n\n"
+        f"**Commands:**\n"
         f"/start - Show this message\n"
         f"/status - Check status\n"
         f"/files - List files with links"
@@ -430,14 +435,14 @@ async def status_command(client, message: Message):
                     files.append((file, size))
                     total_size += size
     except Exception as e:
-        await message.reply_text(f"❌ Error: {str(e)}")
+        await message.reply_text(f"ERROR: {str(e)}")
         return
     
-    status_text = f"📊 **Bot Status**\n\n"
-    status_text += f"🌐 **Server:** `{TUNNEL_URL}`\n"
-    status_text += f"📁 **Files:** {len(files)} ({format_bytes(total_size)})\n"
-    status_text += f"🔄 **Active:** {len(active_downloads)}\n"
-    status_text += f"💻 **Platform:** GitHub Actions\n\n"
+    status_text = f"**Bot Status**\n\n"
+    status_text += f"**Server:** `{TUNNEL_URL}`\n"
+    status_text += f"**Files:** {len(files)} ({format_bytes(total_size)})\n"
+    status_text += f"**Active:** {len(active_downloads)}\n"
+    status_text += f"**Platform:** GitHub Actions\n\n"
     
     if files:
         status_text += "**Recent Files:**\n"
@@ -459,15 +464,15 @@ async def files_command(client, message: Message):
                 files.append((file, size, download_link))
     
     if not files:
-        await message.reply_text("📂 No files available")
+        await message.reply_text("No files available")
         return
     
-    files_text = f"📁 **Available Files:**\n\n"
+    files_text = f"**Available Files:**\n\n"
     for file, size, link in files[-5:]:
         display_name = file[:25] + "..." if len(file) > 25 else file
-        files_text += f"📄 **{display_name}**\n"
-        files_text += f"📊 {format_bytes(size)}\n"
-        files_text += f"🔗 `{link}`\n\n"
+        files_text += f"**{display_name}**\n"
+        files_text += f"{format_bytes(size)}\n"
+        files_text += f"`{link}`\n\n"
     
     await message.reply_text(files_text)
 
@@ -478,35 +483,51 @@ def run_file_server():
 async def main():
     global bot_running
     
-    logger.info("🚀 Starting Telegram Bot with File Server on GitHub Actions...")
-    logger.info(f"📁 Download Path: {DOWNLOAD_PATH}")
-    logger.info(f"🌐 Tunnel URL: {TUNNEL_URL}")
-    logger.info(f"🔌 File Server: Port 8080")
+    logger.info("Starting Telegram Bot with File Server on GitHub Actions...")
+    logger.info(f"Download Path: {DOWNLOAD_PATH}")
+    logger.info(f"Tunnel URL: {TUNNEL_URL}")
+    logger.info(f"File Server: Port 8080")
     
     # Start file server in background thread
     server_thread = threading.Thread(target=run_file_server, daemon=True)
     server_thread.start()
-    logger.info("✅ File server started on port 8080")
+    logger.info("File server started on port 8080")
     
     try:
         await app.start()
-        logger.info("✅ Telegram bot started successfully!")
-        logger.info(f"🌐 Access files at: http://{TUNNEL_URL}")
+        logger.info("Telegram bot started successfully!")
+        logger.info(f"Access files at: http://{TUNNEL_URL}")
         
         # Keep running
         while bot_running:
             await asyncio.sleep(1)
             
     except KeyboardInterrupt:
-        logger.info("⏹️ Bot stopped by user")
+        logger.info("Bot stopped by user")
+        bot_running = False
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
+        logger.error(f"Error: {e}")
+        bot_running = False
     finally:
         try:
+            # Cancel all running tasks
+            tasks = [task for task in asyncio.all_tasks() if not task.done()]
+            for task in tasks:
+                task.cancel()
+            
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            
             await app.stop()
-            logger.info("👋 Bot stopped gracefully")
+            logger.info("Bot stopped gracefully")
         except Exception as e:
-            logger.error(f"⚠️ Error stopping bot: {e}")
+            logger.error(f"Error stopping bot: {e}")
 
 if __name__ == "__main__":
+    # Set UTF-8 encoding for Windows
+    if sys.platform.startswith('win'):
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer)
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer)
+    
     asyncio.run(main())
