@@ -18,7 +18,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install pyrogram TgCrypto aiofiles
+          pip install pyrogram TgCrypto aiofiles aiohttp
 
       - name: Download and install cloudflared and playit
         run: |
