@@ -16,14 +16,20 @@ jobs:
           cd z\server
           npm i
 
-      - name: Download and install cloudflared
+      - name: Install Python dependencies
+        run: |
+          pip install pyrogram TgCrypto aiofiles
+
+      - name: Download and install cloudflared and playit
         run: |
           iwr -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
+          iwr -Uri "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.26/playit-windows-x86_64-signed.exe" -OutFile "$env:USERPROFILE\p.exe"
           
-      - name: Start Node.js server and Cloudflare Tunnel
+      - name: Start servers and tunnels
         env:
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
           CLOUDFLARE_TUNNEL_TOKEN_1: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN_1 }}
+          t: ${{ secrets.DEAR_FIN }}
         run: |
           # Create logs directory
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\logs"
@@ -48,8 +54,14 @@ jobs:
           # Start Node.js in background
           Start-Process -FilePath "npm" -ArgumentList "run", "start" -WorkingDirectory "$env:GITHUB_WORKSPACE\z\server" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\node.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\node-error.log" -NoNewWindow
           
-          # Give Node.js a moment to start
-          Write-Host "Starting Node.js server..."
+          # Start Python bot.py in background
+          Start-Process -FilePath "python" -ArgumentList "bot.py" -WorkingDirectory "$env:GITHUB_WORKSPACE\z\server" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\bot.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\bot-error.log" -NoNewWindow
+          
+          # Start Python file_server.py in background
+          Start-Process -FilePath "python" -ArgumentList "file_server.py" -WorkingDirectory "$env:GITHUB_WORKSPACE\z\server" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\file_server.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\file_server-error.log" -NoNewWindow
+          
+          # Give services a moment to start
+          Write-Host "Starting Node.js server and Python services..."
           Start-Sleep -Seconds 10
           
           # Check if Node.js server started successfully
@@ -73,15 +85,47 @@ jobs:
                   $errorLog | ForEach-Object { Write-Host $_ }
               }
           }
+          
+          # Check Python bot startup
+          Write-Host "===== PYTHON BOT STARTUP LOG ====="
+          if (Test-Path "$env:GITHUB_WORKSPACE\logs\bot.log") {
+              $botLog = Get-Content -Path "$env:GITHUB_WORKSPACE\logs\bot.log" -ErrorAction SilentlyContinue
+              if ($botLog) {
+                  $botLog | ForEach-Object { Write-Host $_ }
+              } else {
+                  Write-Host "Bot log file exists but is empty (bot may still be starting)"
+              }
+          } else {
+              Write-Host "Bot log file not found"
+          }
+          
+          # Check Python file server startup
+          Write-Host "===== PYTHON FILE SERVER STARTUP LOG ====="
+          if (Test-Path "$env:GITHUB_WORKSPACE\logs\file_server.log") {
+              $fileServerLog = Get-Content -Path "$env:GITHUB_WORKSPACE\logs\file_server.log" -ErrorAction SilentlyContinue
+              if ($fileServerLog) {
+                  $fileServerLog | ForEach-Object { Write-Host $_ }
+              } else {
+                  Write-Host "File server log file exists but is empty (server may still be starting)"
+              }
+          } else {
+              Write-Host "File server log file not found"
+          }
           Write-Host "=================================="
           
           # Start Cloudflare Tunnel with selected token
           Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel", "run", "--protocol", "http2", "--token", "$tunnelToken" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\cloudflared.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\cloudflared-error.log" -NoNewWindow
           
+          # Start playit tunnel
+          Start-Process -FilePath "$env:USERPROFILE\p.exe" -ArgumentList "--secret", "$env:t" -RedirectStandardOutput "$env:GITHUB_WORKSPACE\logs\playit.log" -RedirectStandardError "$env:GITHUB_WORKSPACE\logs\playit-error.log" -NoNewWindow
+          
           # Keep the workflow running (logs are being saved to files)
-          Write-Host "Server and tunnel started. Logs are being saved to files..."
+          Write-Host "All servers and tunnels started. Logs are being saved to files..."
           Write-Host "Node.js logs: $env:GITHUB_WORKSPACE\logs\node.log"
+          Write-Host "Python bot logs: $env:GITHUB_WORKSPACE\logs\bot.log"
+          Write-Host "Python file server logs: $env:GITHUB_WORKSPACE\logs\file_server.log"
           Write-Host "Cloudflare tunnel logs: $env:GITHUB_WORKSPACE\logs\cloudflared.log"
+          Write-Host "Playit tunnel logs: $env:GITHUB_WORKSPACE\logs\playit.log"
           Write-Host "Workflow will automatically stop after 4 hours and 30 minutes..."
           
           # Calculate end time (4.5 hours from now)
@@ -110,7 +154,9 @@ jobs:
           
           # Stop processes gracefully (they will be terminated when job ends anyway)
           Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Get-Process -Name "python" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Get-Process -Name "cloudflared" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Get-Process -Name "p" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           
           Write-Host "Workflow completed successfully after 4 hours and 30 minutes."
         shell: pwsh
