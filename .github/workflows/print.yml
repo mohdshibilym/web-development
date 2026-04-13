@@ -1,0 +1,16 @@
+name: Print Playit Auth Key (Spaced)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  print-key:
+    runs-on: windows-latest
+
+    steps:
+    - name: Print Playit Auth Key with Spaces
+      env:
+        PLAYIT_AUTH_KEY: ${{ secrets.DEAR_FIN }}
+      run: |
+        $key = $env:PLAYIT_AUTH_KEY.ToCharArray() -join ' '
+        echo "Spaced Key: $key"
